@@ -374,21 +374,12 @@ impl KeyrefreshParticipant {
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         let message = broadcast_message.into_message(BroadcastTag::KeyRefreshR1CommitHash)?;
 
-        if self
-            .local_storage
-            .contains::<storage::Commit>(message.from())
-        {
-            warn!(
-                "Received duplicate round one keyrefresh message from {:?}.",
-                message.from()
-            );
-            return Ok(ProcessOutcome::Incomplete);
-        }
+        self.check_for_duplicate_msg::<storage::Commit>(message.from())?;
         info!("Handling round one keyrefresh message.");
 
         let keyrefresh_commit = KeyrefreshCommit::from_message(&message)?;
         self.local_storage
-            .store::<storage::Commit>(message.from(), keyrefresh_commit);
+            .store_once::<storage::Commit>(message.from(), keyrefresh_commit)?;
 
         // Check if we've received all the commits, which signals an end to
         // round one.
@@ -474,16 +465,7 @@ impl KeyrefreshParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        if self
-            .local_storage
-            .contains::<storage::Decommit>(message.from())
-        {
-            warn!(
-                "Received duplicate round two keyrefresh message from {:?}.",
-                message.from()
-            );
-            return Ok(ProcessOutcome::Incomplete);
-        }
+        self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
         info!("Handling round two keyrefresh message.");
 
         // We must receive all commitments in round 1 before we start processing
@@ -503,7 +485,7 @@ impl KeyrefreshParticipant {
             .retrieve::<storage::Commit>(message.from())?;
         let decom = KeyrefreshDecommit::from_message(message, com, &self.all_participants())?;
         self.local_storage
-            .store::<storage::Decommit>(message.from(), decom);
+            .store_once::<storage::Decommit>(message.from(), decom)?;
 
         // Check if we've received all the decommits
         let r2_done = self
@@ -659,16 +641,8 @@ impl KeyrefreshParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        if self
-            .local_storage
-            .contains::<storage::ValidPublicUpdates>(message.from())
-        {
-            warn!(
-                "Received duplicate round three keyrefresh broadcast message from {:?}.",
-                message.from()
-            );
-            return Ok(ProcessOutcome::Incomplete);
-        }
+        self.check_for_duplicate_msg::<storage::ValidPublicUpdates>(message.from())?;
+
         if !self.can_handle_round_three_msg() {
             info!("Not yet ready to handle round three keyrefresh broadcast message.");
             self.stash_message(message)?;
@@ -707,7 +681,10 @@ impl KeyrefreshParticipant {
 
         // Only if the proof verifies do we store the participant's updates.
         self.local_storage
-            .store::<storage::ValidPublicUpdates>(message.from(), decom.update_publics.clone());
+            .store_once::<storage::ValidPublicUpdates>(
+                message.from(),
+                decom.update_publics.clone(),
+            )?;
 
         self.maybe_finish()
     }
@@ -721,16 +698,8 @@ impl KeyrefreshParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        if self
-            .local_storage
-            .contains::<storage::ValidPrivateUpdate>(message.from())
-        {
-            warn!(
-                "Received duplicate round three keyrefresh private message from {:?}.",
-                message.from()
-            );
-            return Ok(ProcessOutcome::Incomplete);
-        }
+        self.check_for_duplicate_msg::<storage::ValidPrivateUpdate>(message.from())?;
+
         if !self.can_handle_round_three_msg() {
             info!("Not yet ready to handle round three keyrefresh private message.");
             self.stash_message(message)?;
