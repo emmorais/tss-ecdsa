@@ -375,9 +375,12 @@ impl SignParticipant {
             return Ok(ProcessOutcome::Incomplete);
         }
 
+        self.check_for_duplicate_msg::<storage::Share>(message.from())?;
+
         // Save this signature share
         let share = SignatureShare::try_from(message)?;
-        self.storage.store::<storage::Share>(message.from(), share);
+        self.storage
+            .store_once::<storage::Share>(message.from(), share)?;
 
         // If we haven't received shares from all parties, stop here
         if !self

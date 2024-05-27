@@ -446,12 +446,14 @@ impl PresignParticipant {
         rng: &mut R,
         broadcast_message: BroadcastOutput,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        let message = broadcast_message.into_message(BroadcastTag::PresignR1Ciphertexts)?;
+
+        self.check_for_duplicate_msg::<storage::RoundOnePublicBroadcast>(message.from())?;
         info!("Presign: Handling round one broadcast message.");
 
-        let message = broadcast_message.into_message(BroadcastTag::PresignR1Ciphertexts)?;
         let public_broadcast: round_one::PublicBroadcast = deserialize!(&message.unverified_bytes)?;
         self.local_storage
-            .store::<storage::RoundOnePublicBroadcast>(message.from(), public_broadcast);
+            .store_once::<storage::RoundOnePublicBroadcast>(message.from(), public_broadcast)?;
 
         // Check to see if we have already stored the round one non-broadcast
         // message from the given participant. If so, retrieve and process it.
@@ -485,6 +487,7 @@ impl PresignParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        self.check_for_duplicate_msg::<storage::RoundOneComplete>(message.from())?;
         info!("Presign: Handling round one message.");
 
         // First check that we have the round one public broadcast from this
@@ -519,7 +522,7 @@ impl PresignParticipant {
         // Since we don't need the round one message in the rest of the
         // protocol, we don't need to store it in storage.
         self.local_storage
-            .store::<storage::RoundOneComplete>(message.from(), ());
+            .store_once::<storage::RoundOneComplete>(message.from(), ())?;
         // Check if we're done with round one by checking that we're done with
         // round one for all other participants.
         if self
@@ -798,6 +801,8 @@ impl PresignParticipant {
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_two_public(&mut self, message: &Message) -> Result<()> {
+        self.check_for_duplicate_msg::<storage::RoundTwoPublic>(message.from())?;
+
         let input = self.input();
 
         let receiver_auxinfo_public = input.find_auxinfo_public(message.to())?;
@@ -821,13 +826,15 @@ impl PresignParticipant {
         )?;
 
         self.local_storage
-            .store::<storage::RoundTwoPublic>(message.from(), round_two_public);
+            .store_once::<storage::RoundTwoPublic>(message.from(), round_two_public)?;
 
         Ok(())
     }
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_three_public(&mut self, message: &Message) -> Result<()> {
+        self.check_for_duplicate_msg::<storage::RoundThreePublic>(message.from())?;
+
         let input = self.input();
         let receiver_auxinfo_public = input.find_auxinfo_public(message.to())?;
         let sender_auxinfo_public = input.find_auxinfo_public(message.from())?;
@@ -843,7 +850,7 @@ impl PresignParticipant {
         )?;
 
         self.local_storage
-            .store::<storage::RoundThreePublic>(message.from(), public);
+            .store_once::<storage::RoundThreePublic>(message.from(), public)?;
         Ok(())
     }
 }
