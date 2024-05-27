@@ -103,6 +103,29 @@ impl PresignContext {
             auxinfo_public,
         }
     }
+
+    fn for_participant(self, pid: ParticipantIdentifier) -> ParticipantPresignContext {
+        ParticipantPresignContext {
+            presign_context: self,
+            participant_id: pid,
+        }
+    }
+}
+
+pub struct ParticipantPresignContext {
+    presign_context: PresignContext,
+    participant_id: ParticipantIdentifier,
+}
+
+impl ProofContext for ParticipantPresignContext {
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        Ok([
+            self.presign_context.as_bytes()?,
+            bincode::serialize(&self.participant_id)
+                .map_err(|_| InternalError::InternalInvariantFailed)?,
+        ]
+        .concat())
+    }
 }
 
 /// A [`ProtocolParticipant`] that runs the presign protocol[^cite].
@@ -403,8 +426,11 @@ impl PresignParticipant {
         let other_public_auxinfo = self.input().all_but_one_auxinfo_public(self.id);
 
         // Run round one.
-        let (private, r1_publics, r1_public_broadcast) =
-            info.round_one(rng, &self.retrieve_context(), &other_public_auxinfo)?;
+        let (private, r1_publics, r1_public_broadcast) = info.round_one(
+            rng,
+            &self.retrieve_context().for_participant(self.id()),
+            &other_public_auxinfo,
+        )?;
 
         // Store private round one value locally.
         self.local_storage
@@ -509,7 +535,7 @@ impl PresignParticipant {
         let auxinfo_public = self.input().find_auxinfo_public(message.from())?;
         let round_one_public = round_one::Public::try_from(message)?;
         round_one_public.verify(
-            &self.retrieve_context(),
+            &self.retrieve_context().for_participant(message.from()),
             info.aux_info_public.params(),
             auxinfo_public.pk(),
             r1_public_broadcast,
@@ -581,7 +607,7 @@ impl PresignParticipant {
                 let sender_auxinfo_public = self.input().find_auxinfo_public(pid)?;
                 let (r2_priv, r2_pub) = info.round_two(
                     rng,
-                    &self.retrieve_context(),
+                    &self.retrieve_context().for_participant(self.id()),
                     sender_auxinfo_public,
                     r1_priv,
                     r1_public_broadcast,
@@ -695,8 +721,12 @@ impl PresignParticipant {
             .local_storage
             .retrieve::<storage::RoundOnePrivate>(self.id)?;
 
-        let (r3_private, r3_publics_map) =
-            info.round_three(rng, &self.retrieve_context(), r1_priv, &hashmap)?;
+        let (r3_private, r3_publics_map) = info.round_three(
+            rng,
+            &self.retrieve_context().for_participant(self.id()),
+            r1_priv,
+            &hashmap,
+        )?;
 
         self.local_storage
             .store::<storage::RoundThreePrivate>(self.id, r3_private);
@@ -812,7 +842,7 @@ impl PresignParticipant {
 
         let round_two_public = round_two::Public::try_from(message)?;
         round_two_public.clone().verify(
-            &self.retrieve_context(),
+            &self.retrieve_context().for_participant(message.from()),
             receiver_auxinfo_public,
             receiver_r1_private,
             sender_auxinfo_public,
@@ -836,7 +866,7 @@ impl PresignParticipant {
             .retrieve::<storage::RoundOnePublicBroadcast>(message.from())?;
         let public = round_three::Public::try_from(message)?;
         public.clone().verify(
-            &self.retrieve_context(),
+            &self.retrieve_context().for_participant(message.from()),
             receiver_auxinfo_public,
             sender_auxinfo_public,
             sender_r1_public_broadcast,
@@ -881,7 +911,7 @@ impl PresignKeyShareAndInfo {
     fn round_one<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         other_auxinfos: &[&AuxInfoPublic],
     ) -> Result<(
         round_one::Private,
@@ -942,7 +972,7 @@ impl PresignKeyShareAndInfo {
     fn round_two<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         receiver_aux_info: &AuxInfoPublic,
         sender_r1_priv: &round_one::Private,
         receiver_r1_pub_broadcast: &round_one::PublicBroadcast,
@@ -1072,7 +1102,7 @@ impl PresignKeyShareAndInfo {
     fn round_three<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         sender_r1_priv: &round_one::Private,
         other_participant_inputs: &HashMap<ParticipantIdentifier, round_three::Input>,
     ) -> Result<(

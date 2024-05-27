@@ -12,7 +12,7 @@ use crate::{
     messages::{AuxinfoMessageType, Message, MessageType},
     participant::InnerProtocolParticipant,
     ring_pedersen::VerifiedRingPedersen,
-    Identifier,
+    Identifier, ParticipantIdentifier,
 };
 
 use crate::zkp::{pifac, pimod, Proof, ProofContext};
@@ -37,6 +37,7 @@ pub(crate) struct CommonInput<'a> {
     shared_context: &'a <AuxInfoParticipant as InnerProtocolParticipant>::Context,
     sid: Identifier,
     rho: [u8; 32],
+    pid: ParticipantIdentifier,
     setup_parameters: &'a VerifiedRingPedersen,
     modulus: &'a BigNumber,
 }
@@ -47,6 +48,7 @@ impl<'a> CommonInput<'a> {
         shared_context: &'a <AuxInfoParticipant as InnerProtocolParticipant>::Context,
         sid: Identifier,
         rho: [u8; 32],
+        pid: ParticipantIdentifier,
         verifier_setup_parameters: &'a VerifiedRingPedersen,
         modulus: &'a BigNumber,
     ) -> CommonInput<'a> {
@@ -54,6 +56,7 @@ impl<'a> CommonInput<'a> {
             shared_context,
             sid,
             rho,
+            pid,
             setup_parameters: verifier_setup_parameters,
             modulus,
         }
@@ -95,6 +98,7 @@ impl AuxInfoProof {
             common_input.shared_context,
             common_input.sid,
             common_input.rho,
+            common_input.pid,
         )?;
         let pimod = pimod::PiModProof::prove(
             pimod::CommonInput::new(common_input.modulus),
@@ -108,6 +112,7 @@ impl AuxInfoProof {
             common_input.shared_context,
             common_input.sid,
             common_input.rho,
+            common_input.pid,
         )?;
         let pifac = pifac::PiFacProof::prove(
             pifac::CommonInput::new(common_input.setup_parameters, common_input.modulus),
@@ -133,6 +138,7 @@ impl AuxInfoProof {
             common_input.shared_context,
             common_input.sid,
             common_input.rho,
+            common_input.pid,
         )?;
         self.pimod.verify(
             pimod::CommonInput::new(common_input.modulus),
@@ -144,6 +150,7 @@ impl AuxInfoProof {
             common_input.shared_context,
             common_input.sid,
             common_input.rho,
+            common_input.pid,
         )?;
         self.pifac.verify(
             pifac::CommonInput::new(common_input.setup_parameters, common_input.modulus),
@@ -160,11 +167,13 @@ impl AuxInfoProof {
         context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
         sid: Identifier,
         rho: [u8; 32],
+        pid: ParticipantIdentifier,
     ) -> Result<()> {
         transcript.append_message(b"PaillierBumModulusProof", b"");
         transcript.append_message(b"PiMod ProofContext", &context.as_bytes()?);
         transcript.append_message(b"Session Id", &serialize!(&sid)?);
         transcript.append_message(b"rho", &rho);
+        transcript.append_message(b"Participant ID", &serialize!(&pid)?);
         Ok(())
     }
 
@@ -175,11 +184,13 @@ impl AuxInfoProof {
         context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
         sid: Identifier,
         rho: [u8; 32],
+        pid: ParticipantIdentifier,
     ) -> Result<()> {
         transcript.append_message(b"PiFacProof", b"");
         transcript.append_message(b"PiFac ProofContext", &context.as_bytes()?);
         transcript.append_message(b"Session Id", &serialize!(&sid)?);
         transcript.append_message(b"rho", &rho);
+        transcript.append_message(b"Participant ID", &serialize!(&pid)?);
         Ok(())
     }
 }
@@ -196,11 +207,13 @@ mod tests {
     ) -> Result<()> {
         let sid = Identifier::random(rng);
         let rho = rng.gen();
+        let pid = ParticipantIdentifier::random(rng);
         let setup_params = VerifiedRingPedersen::gen(rng, &()).unwrap();
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(rng).unwrap();
         let modulus = &p * &q;
         let shared_context = SharedContext::random(rng);
-        let common_input = CommonInput::new(&shared_context, sid, rho, &setup_params, &modulus);
+        let common_input =
+            CommonInput::new(&shared_context, sid, rho, pid, &setup_params, &modulus);
         let proof = AuxInfoProof::prove(rng, &common_input, &p, &q).unwrap();
         test_code(common_input, proof)
     }
@@ -210,11 +223,13 @@ mod tests {
         let mut rng = init_testing();
         let sid = Identifier::random(&mut rng);
         let rho = rng.gen();
+        let pid = ParticipantIdentifier::random(&mut rng);
         let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let modulus = &p * &q;
         let shared_context = SharedContext::random(&mut rng);
-        let common_input = CommonInput::new(&shared_context, sid, rho, &setup_params, &modulus);
+        let common_input =
+            CommonInput::new(&shared_context, sid, rho, pid, &setup_params, &modulus);
         let proof = AuxInfoProof::prove(&mut rng, &common_input, &p, &q)?;
         assert!(proof.verify(&common_input).is_ok());
         Ok(())
@@ -250,12 +265,13 @@ mod tests {
         let mut rng = init_testing();
         let sid = Identifier::random(&mut rng);
         let rho = rng.gen();
+        let pid = ParticipantIdentifier::random(&mut rng);
         let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let (p1, q1) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let modulus = &p * &q;
         let shared_context = &SharedContext::random(&mut rng);
-        let common_input = CommonInput::new(shared_context, sid, rho, &setup_params, &modulus);
+        let common_input = CommonInput::new(shared_context, sid, rho, pid, &setup_params, &modulus);
         match AuxInfoProof::prove(&mut rng, &common_input, &p1, &q1) {
             Ok(proof) => assert!(proof.verify(&common_input).is_err()),
             Err(_) => return Ok(()),
@@ -268,6 +284,7 @@ mod tests {
         let mut rng = init_testing();
         let sid = Identifier::random(&mut rng);
         let rho = rng.gen();
+        let pid = ParticipantIdentifier::random(&mut rng);
         let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let modulus = &p * &q;
@@ -277,6 +294,7 @@ mod tests {
             shared_context,
             sid,
             rho,
+            pid,
             setup_parameters: &setup_params,
             modulus: &modulus,
         };
@@ -284,6 +302,7 @@ mod tests {
             shared_context: bad_shared_context,
             sid,
             rho,
+            pid,
             setup_parameters: &setup_params,
             modulus: &modulus,
         };
