@@ -319,12 +319,13 @@ impl AuxInfoParticipant {
         rng: &mut R,
         broadcast_message: BroadcastOutput,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        info!("Handling round one auxinfo message.");
-
         let message = broadcast_message.into_message(BroadcastTag::AuxinfoR1CommitHash)?;
 
+        self.check_for_duplicate_msg::<storage::Commit>(message.from())?;
+        info!("Handling round one auxinfo message.");
+
         self.local_storage
-            .store::<storage::Commit>(message.from(), Commitment::from_message(&message)?);
+            .store_once::<storage::Commit>(message.from(), Commitment::from_message(&message)?)?;
 
         // Check if we've received all the commitments.
         //
@@ -400,6 +401,7 @@ impl AuxInfoParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
         info!("Handling round two auxinfo message.");
 
         // We must receive all commitments in round 1 before we start processing
@@ -422,7 +424,7 @@ impl AuxInfoParticipant {
             .retrieve::<storage::Commit>(message.from())?;
         scheme.verify(&message.id(), &message.from(), com)?;
         self.local_storage
-            .store::<storage::Decommit>(message.from(), scheme);
+            .store_once::<storage::Decommit>(message.from(), scheme)?;
 
         // Check if we've received all the decommitments.
         //
@@ -530,6 +532,7 @@ impl AuxInfoParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        self.check_for_duplicate_msg::<storage::Public>(message.from())?;
         info!("Handling round three auxinfo message.");
 
         // We can't handle this message unless we already calculated the global_rid
@@ -560,7 +563,7 @@ impl AuxInfoParticipant {
         proof.verify(&common_input)?;
 
         self.local_storage
-            .store::<storage::Public>(message.from(), auxinfo_pub);
+            .store_once::<storage::Public>(message.from(), auxinfo_pub)?;
 
         // Check if we've stored all the `AuxInfoPublic`s.
         let done = self
