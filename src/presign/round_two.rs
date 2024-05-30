@@ -12,12 +12,15 @@ use crate::{
     keygen::KeySharePublic,
     messages::{Message, MessageType, PresignMessageType},
     paillier::Ciphertext,
-    presign::round_one::{Private as RoundOnePrivate, PublicBroadcast as RoundOnePublicBroadcast},
+    presign::{
+        participant::ParticipantPresignContext,
+        round_one::{Private as RoundOnePrivate, PublicBroadcast as RoundOnePublicBroadcast},
+    },
     utils::CurvePoint,
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof},
         pilog::{CommonInput, PiLogProof},
-        Proof, ProofContext,
+        Proof,
     },
 };
 use libpaillier::unknown_order::BigNumber;
@@ -65,7 +68,7 @@ impl Public {
     /// [`PublicBroadcast`](crate::presign::round_one::PublicBroadcast) values.
     pub(crate) fn verify(
         self,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         verifier_auxinfo_public: &AuxInfoPublic,
         verifier_r1_private: &RoundOnePrivate,
         prover_auxinfo_public: &AuxInfoPublic,

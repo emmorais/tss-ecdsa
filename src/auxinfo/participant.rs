@@ -505,7 +505,7 @@ impl AuxInfoParticipant {
                 let shared_context = &self.retrieve_context();
                 // ... and use its setup parameters in the proof.
                 let common_input =
-                    CommonInput::new(shared_context, sid, global_rid, params, &product);
+                    CommonInput::new(shared_context, sid, global_rid, self.id(), params, &product);
                 let proof = AuxInfoProof::prove(rng, &common_input, &witness.p, &witness.q)?;
                 Message::new(
                     MessageType::Auxinfo(AuxinfoMessageType::R3Proof),
@@ -555,6 +555,7 @@ impl AuxInfoParticipant {
             shared_context,
             message.id(),
             *global_rid,
+            message.from(),
             my_public.params(),
             auxinfo_pub.pk().modulus(),
         );

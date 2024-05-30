@@ -6,6 +6,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use super::participant::ParticipantPresignContext;
 use crate::{
     errors::{InternalError, Result},
     messages::{Message, MessageType, PresignMessageType},
@@ -13,7 +14,7 @@ use crate::{
     ring_pedersen::VerifiedRingPedersen,
     zkp::{
         pienc::{PiEncInput, PiEncProof},
-        Proof, ProofContext,
+        Proof,
     },
 };
 use libpaillier::unknown_order::BigNumber;
@@ -80,7 +81,7 @@ impl Public {
     /// (i.e., the verifier).
     pub(crate) fn verify(
         self,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         verifier_setup_params: &VerifiedRingPedersen,
         prover_pk: &EncryptionKey,
         prover_public_broadcast: &PublicBroadcast,

@@ -11,13 +11,14 @@ use crate::{
     errors::{InternalError, Result},
     messages::{Message, MessageType, PresignMessageType},
     presign::{
+        participant::ParticipantPresignContext,
         round_one::PublicBroadcast as RoundOnePublicBroadcast,
         round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
     },
     utils::CurvePoint,
     zkp::{
         pilog::{CommonInput, PiLogProof},
-        Proof, ProofContext,
+        Proof,
     },
 };
 use k256::{elliptic_curve::PrimeField, Scalar};
@@ -75,7 +76,7 @@ impl Public {
     /// values.
     pub(crate) fn verify(
         self,
-        context: &impl ProofContext,
+        context: &ParticipantPresignContext,
         verifier_auxinfo_public: &AuxInfoPublic,
         prover_auxinfo_public: &AuxInfoPublic,
         prover_r1_public_broadcast: &RoundOnePublicBroadcast,
