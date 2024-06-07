@@ -81,6 +81,10 @@ impl Input {
         })
     }
 
+    pub(crate) fn rid(&self) -> &[u8; 32] {
+        self.keygen_output.rid()
+    }
+
     pub(crate) fn public_key_shares(&self) -> &[KeySharePublic] {
         self.keygen_output.public_key_shares()
     }
