@@ -79,6 +79,7 @@ mod storage {
 #[derive(Debug)]
 pub(crate) struct PresignContext {
     shared_context: SharedContext,
+    rid: [u8; 32],
     auxinfo_public: Vec<AuxInfoPublic>,
 }
 
@@ -86,6 +87,7 @@ impl ProofContext for PresignContext {
     fn as_bytes(&self) -> Result<Vec<u8>> {
         Ok([
             self.shared_context.as_bytes()?,
+            self.rid[..].to_vec(),
             bincode::serialize(&self.auxinfo_public)
                 .map_err(|_| InternalError::InternalInvariantFailed)?,
         ]
@@ -100,6 +102,7 @@ impl PresignContext {
         auxinfo_public.sort_by_key(AuxInfoPublic::participant);
         Self {
             shared_context: SharedContext::collect(p),
+            rid: *p.input().rid(),
             auxinfo_public,
         }
     }
