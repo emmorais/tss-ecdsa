@@ -207,6 +207,7 @@ pub mod errors;
 
 pub mod auxinfo;
 mod broadcast;
+mod gmp_zeroize;
 pub mod keygen;
 pub mod keyrefresh;
 mod local_storage;
@@ -223,6 +224,7 @@ mod utils;
 mod zkp;
 mod zkstar;
 
+pub use gmp_zeroize::enable_zeroize;
 pub use participant::ProtocolParticipant;
 pub use protocol::{
     participant_config::ParticipantConfig, Identifier, Participant, ParticipantIdentifier,
