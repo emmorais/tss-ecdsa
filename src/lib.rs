@@ -224,6 +224,7 @@ pub mod tshare;
 mod utils;
 mod zkp;
 mod zkstar;
+mod threshold;
 
 pub use gmp_zeroize::enable_zeroize;
 pub use participant::ProtocolParticipant;

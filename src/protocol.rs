@@ -815,9 +815,16 @@ mod tests {
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
-    fn full_protocol_execution_with_noninteractive_signing_works() -> Result<()> {
+    fn test_full_protocol_execution_with_noninteractive_signing_works() {
+        let result = full_protocol_execution_with_noninteractive_signing_works(3, 3, 3);
+        assert!(result.is_ok());
+    }
+
+    fn full_protocol_execution_with_noninteractive_signing_works(r: usize, t: usize, n: usize) -> Result<()> {
         let mut rng = init_testing();
-        let QUORUM_SIZE = 3;
+        let QUORUM_REAL = r; // only r participants are going to participate
+        let QUORUM_THRESHOLD = t; // threshold t
+        let QUORUM_SIZE = n; // total number of participants
         // Set GLOBAL config for participants
         let configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng).unwrap();
 
@@ -973,12 +980,20 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
+        // TODO: tshare phase 
+
+        // TODO: delete n-r participants from configs
+
+        // TODO: if less than t participants are present, then the protocol should fail
+
+        // TODO: adapt signature for threshold
+
         // Make signing participants
         let mut sign_quorum = configs
             .into_iter()
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
-                let input = sign::Input::new(message, record, public_key_shares.clone());
+                let input = sign::Input::new(message, record, public_key_shares.clone(), QUORUM_THRESHOLD);
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;

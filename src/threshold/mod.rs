@@ -1,0 +1,91 @@
+use k256::{elliptic_curve::Field, Scalar};
+use rand::Rng;
+
+fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
+    let mut coefficients = Vec::with_capacity(t);
+    for _ in 0..t {
+        coefficients.push(Scalar::random(&mut *rng));
+    }
+    coefficients
+}
+
+fn evaluate_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
+    coefficients
+        .iter()
+        .rev()
+        .fold(Scalar::ZERO, |acc, coef| acc * x + coef)
+}
+
+fn lagrange_coefficient(my_point: &Scalar, other_points: &Vec<Scalar>) -> Scalar {
+    let mut result = Scalar::ONE;
+    for point in other_points {
+        if point != my_point {
+            let denominator = my_point - point;
+            let inv = denominator.invert().unwrap();
+            result *= point * &inv;
+        }
+    }
+    result
+}
+
+fn evaluate_at_points(coefficients: &Vec<Scalar>, points: &Vec<Scalar>) -> Vec<Scalar> {
+    points
+        .iter()
+        .map(|x| evaluate_polynomial(coefficients, x))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::thread_rng;
+
+    #[test]
+    fn test_generate_and_evaluate_polynomial() {
+        let mut rng = thread_rng();
+        let t = 3;
+        let coefficients = generate_polynomial(t, &mut rng);
+
+        let x = Scalar::random(&mut rng);
+        let value = evaluate_polynomial(&coefficients, &x);
+        
+        // Just to check if we got something
+        // non-trivial
+        assert!(!bool::from(value.is_zero())); 
+    }
+
+    #[test]
+    fn test_lagrange_coefficients() {
+        let points: Vec<Scalar> = (1..=3).map(|i:u32| Scalar::from(i)).collect();
+        let evaluated_values = vec![
+            points[0] * Scalar::from(2u32),
+            points[1] * Scalar::from(3u32),
+            points[2] * Scalar::from(4u32),
+        ];
+
+        let reconstructed_zero = evaluated_values
+            .iter()
+            .zip(&points)
+            .map(|(value, point)| *value * lagrange_coefficient(point, &points))
+            .fold(Scalar::ZERO, |acc, x| acc + x);
+        
+        // Check that reconstructed value
+        // at X=0 is correct
+        assert!(bool::from(reconstructed_zero.is_zero())); 
+    }
+
+    #[test]
+    fn test_evaluate_at_points() {
+        let mut rng = thread_rng();
+        let t = 3;
+        let n = 5;
+        let coefficients = generate_polynomial(t, &mut rng);
+
+        let points: Vec<Scalar> = (1..=n).map(|i: u32| Scalar::from(i)).collect();
+        let values = evaluate_at_points(&coefficients, &points);
+
+        for (x, y) in points.iter().zip(values.iter()) {
+            assert_eq!(evaluate_polynomial(&coefficients, x), *y);
+        }
+    }
+}

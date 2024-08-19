@@ -19,17 +19,7 @@ use tracing::{error, info};
 use zeroize::Zeroize;
 
 use crate::{
-    errors::{CallerError, InternalError, Result},
-    keygen::KeySharePublic,
-    local_storage::LocalStorage,
-    messages::{Message, MessageType, SignMessageType},
-    participant::{InnerProtocolParticipant, ProcessOutcome, Status},
-    protocol::{ProtocolType, SharedContext},
-    run_only_once,
-    sign::{non_interactive_sign::share::SignatureShare, Signature},
-    utils::CurvePoint,
-    zkp::ProofContext,
-    Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant,
+    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, local_storage::LocalStorage, messages::{Message, MessageType, SignMessageType}, participant::{InnerProtocolParticipant, ProcessOutcome, Status}, protocol::{ProtocolType, SharedContext}, run_only_once, sign::{non_interactive_sign::share::SignatureShare, Signature}, threshold, utils::CurvePoint, zkp::ProofContext, Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant
 };
 
 /// A participant that runs the non-interactive signing protocol in Figure 8 of
@@ -79,6 +69,7 @@ pub struct Input {
     digest: Keccak256,
     presign_record: PresignRecord,
     public_key_shares: Vec<KeySharePublic>,
+    threshold: usize,
 }
 
 impl Input {
@@ -90,11 +81,13 @@ impl Input {
         message: &[u8],
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
+        threshold: usize,
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
             presign_record: record,
             public_key_shares,
+            threshold,
         }
     }
 
@@ -106,11 +99,13 @@ impl Input {
         digest: Keccak256,
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
+        threshold: usize,
     ) -> Self {
         Self {
             digest,
             presign_record: record,
             public_key_shares,
+            threshold,
         }
     }
 
@@ -409,6 +404,7 @@ impl SignParticipant {
 
         // Sum up the signature shares and convert to BIP-0062 format (negating if the
         // sum is > group order /2)
+        // TODO: replace by Lagrange interpolation
         let mut sum = shares.into_iter().fold(Scalar::ZERO, |a, b| a + b);
         sum.conditional_assign(&sum.negate(), sum.is_high());
 
@@ -550,7 +546,7 @@ mod test {
 
         // Form signing inputs and participants
         let inputs = std::iter::zip(keygen_outputs, presign_records).map(|(keygen, record)| {
-            sign::Input::new(message, record, keygen.public_key_shares().to_vec())
+            sign::Input::new(message, record, keygen.public_key_shares().to_vec(), quorum_size)
         });
         let mut quorum = std::iter::zip(configs, inputs)
             .map(|(config, input)| {

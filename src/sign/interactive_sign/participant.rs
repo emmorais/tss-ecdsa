@@ -111,7 +111,9 @@ impl SigningMaterial {
                 digest,
                 public_keys,
             } => {
-                let signing_input = sign::Input::new_from_digest(*digest, record, public_keys);
+                // TODO: threhsold is not implemented yet for the interactive signing, must use the same as the public keys size
+                let threshold = public_keys.len();
+                let signing_input = sign::Input::new_from_digest(*digest, record, public_keys, threshold);
                 // Note: this shouldn't throw an error because the only failure case should have
                 // also been checked by the presign constructor, and computation
                 // halted far before we reach this point.
@@ -256,7 +258,7 @@ impl ProtocolParticipant for InteractiveSignParticipant {
         // and sign -- e.g. we will not pass a ready message to the `signer` until
         // the `presigner` is sucessfully completed.
         // Another option would be to maintain a status field and update it at
-        // the appropriate poitns.
+        // the appropriate points.
         if !self.presigner.status().is_ready() {
             return &Status::NotReady;
         }
