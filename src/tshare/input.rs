@@ -33,13 +33,13 @@ impl Input {
     /// Creates a new [`Input`] from the outputs of the
     /// [`auxinfo`](crate::auxinfo::AuxInfoParticipant) and
     /// [`keygen`](crate::keygen::KeygenParticipant) protocols.
-    pub fn new(auxinfo_output: auxinfo::Output, threshold: usize) -> Result<Self> {
+    pub fn new(auxinfo_output: auxinfo::Output, share: Option<CoeffPrivate>, threshold: usize) -> Result<Self> {
         // The constructor for auxinfo output already check other important
         // properties, like that the private component maps to one of public
         // components for each one.
         Ok(Self {
             auxinfo_output,
-            share: None,
+            share,
             threshold,
         })
     }
@@ -114,7 +114,7 @@ mod test {
         // Create valid input set with random PIDs
         let config = ParticipantConfig::random(5, rng);
         let auxinfo_output = auxinfo::Output::simulate(&config.all_participants(), rng);
-        let input = Input::new(auxinfo_output, 2)?;
+        let input = Input::new(auxinfo_output, None, 2)?;
 
         // Create valid config with PIDs independent of those used to make the input set
         let config = ParticipantConfig::random(SIZE, rng);

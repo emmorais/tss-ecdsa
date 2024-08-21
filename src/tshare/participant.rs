@@ -886,7 +886,7 @@ mod tests {
             // Make the participants
             zip(configs, auxinfo_outputs)
                 .map(|(config, auxinfo_output)| {
-                    let input = Input::new(auxinfo_output, 2)?;
+                    let input = Input::new(auxinfo_output, None, 2)?;
                     Self::new(sid, config.id(), config.other_ids().to_vec(), input)
                 })
                 .collect::<Result<Vec<_>>>()

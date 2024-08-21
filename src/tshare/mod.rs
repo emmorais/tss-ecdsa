@@ -14,3 +14,6 @@ mod participant;
 mod share;
 
 pub use participant::TshareParticipant;
+pub use input::Input;
+pub use output::Output;
+pub use share::{CoeffPrivate, CoeffPublic};
