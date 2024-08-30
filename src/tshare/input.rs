@@ -106,7 +106,10 @@ impl Input {
 mod test {
     use super::{super::TshareParticipant, Input};
     use crate::{
-        auxinfo, errors::{CallerError, InternalError, Result}, utils::testing::init_testing, Identifier, ParticipantConfig, ParticipantIdentifier, ProtocolParticipant
+        auxinfo,
+        errors::{CallerError, InternalError, Result},
+        utils::testing::init_testing,
+        Identifier, ParticipantConfig, ParticipantIdentifier, ProtocolParticipant,
     };
 
     #[test]
@@ -133,7 +136,7 @@ mod test {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::BadInput)
         );
-        
+
         Ok(())
     }
 
@@ -149,7 +152,8 @@ mod test {
         let independent_config = ParticipantConfig::random(SIZE, rng);
 
         // Replace auxinfo_output with a new one that doesn't match the config
-        let mut auxinfo_output = auxinfo::Output::simulate(&independent_config.all_participants(), rng);
+        let auxinfo_output =
+            auxinfo::Output::simulate(&independent_config.all_participants(), rng);
         let input_with_invalid_auxinfo = Input::new(auxinfo_output, None, 2)?;
         let result = TshareParticipant::new(
             Identifier::random(rng),
@@ -171,14 +175,11 @@ mod test {
         let rng = &mut init_testing();
         let SIZE = 5;
 
-        // Create valid input set with random PIDs
-        let config = ParticipantConfig::random(SIZE, rng);
-
         // create quorum
         let quorum = ParticipantConfig::random_quorum(SIZE, rng).unwrap();
 
         // Replace auxinfo_output with a new one that doesn't match the config
-        let mut auxinfo_output = auxinfo::Output::simulate(&quorum[0].all_participants(), rng);
+        let auxinfo_output = auxinfo::Output::simulate(&quorum[0].all_participants(), rng);
         let input_auxinfo = Input::new(auxinfo_output, None, 2)?;
         let result = TshareParticipant::new(
             Identifier::random(rng),
@@ -225,10 +226,7 @@ mod test {
         let pid = ParticipantIdentifier::random(rng);
         let result = input.find_auxinfo_public(pid);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            InternalError::InternalInvariantFailed
-        );
+        assert_eq!(result.unwrap_err(), InternalError::InternalInvariantFailed);
 
         Ok(())
     }
