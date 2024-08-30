@@ -63,8 +63,9 @@ impl EvalEncrypted {
 /// Private coefficient share.
 #[derive(Clone, ZeroizeOnDrop, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoeffPrivate {
-    /// A BigNumber element in the range [1, q) representing a polynomial coefficient 
-    pub x: BigNumber, 
+    /// A BigNumber element in the range [1, q) representing a polynomial
+    /// coefficient
+    pub x: BigNumber,
 }
 
 impl Debug for CoeffPrivate {

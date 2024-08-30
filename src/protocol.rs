@@ -609,7 +609,13 @@ impl std::fmt::Display for Identifier {
 mod tests {
     use super::*;
     use crate::{
-        auxinfo::AuxInfoParticipant, keygen::KeygenParticipant, participant::Status, presign, sign::{self, InteractiveSignParticipant, SignParticipant}, utils::testing::init_testing, PresignParticipant,
+        auxinfo::AuxInfoParticipant,
+        keygen::KeygenParticipant,
+        participant::Status,
+        presign,
+        sign::{self, InteractiveSignParticipant, SignParticipant},
+        utils::testing::init_testing,
+        PresignParticipant,
     };
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
@@ -814,12 +820,16 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    fn full_protocol_execution_with_noninteractive_signing_works(r: usize, t: usize, n: usize) -> Result<()> {
+    fn full_protocol_execution_with_noninteractive_signing_works(
+        r: usize,
+        t: usize,
+        n: usize,
+    ) -> Result<()> {
         let mut rng = init_testing();
         let _QUORUM_REAL = r; // TODO: only r participants are going to participate, but for now r = n
         let QUORUM_THRESHOLD = t; // threshold t
         let QUORUM_SIZE = n; // total number of participants
-        // Set GLOBAL config for participants
+                             // Set GLOBAL config for participants
         let configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng).unwrap();
 
         // Set up auxinfo participants
@@ -985,7 +995,8 @@ mod tests {
                 //dbg!(config.id());
                 //let record = presign_outputs.remove(&config.id()).unwrap();
                 let record = presign_outputs.remove(&config.id()).unwrap();
-                let input = sign::Input::new(message, record, public_key_shares.clone(), QUORUM_THRESHOLD);
+                let input =
+                    sign::Input::new(message, record, public_key_shares.clone(), QUORUM_THRESHOLD);
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;

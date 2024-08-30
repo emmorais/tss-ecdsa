@@ -88,7 +88,7 @@ Rounds 3:
 - Each participant shares a private evaluation of the polynomial with each of the other participants.
 
 Output:
-- The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points). 
+- The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points).
 The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
 - The private evaluation of the shared polynomial for our participant. `t` of those can reconstruct the secret.
 
@@ -328,7 +328,7 @@ impl TshareParticipant {
         let my_private_share = Self::eval_private_share(&coeff_privates, self.id());
         let my_contant_term = Self::eval_private_share_at_zero(&coeff_privates);
         if let Some(private) = self.input.share() {
-            assert_eq!(my_contant_term, private.x);         
+            assert_eq!(my_contant_term, private.x);
         }
         self.local_storage
             .store::<storage::ValidPrivateEval>(self.id(), my_private_share);
@@ -873,16 +873,16 @@ fn schnorr_proof_transcript(
 
 #[cfg(test)]
 mod tests {
-    use k256::Scalar;
     use super::{super::input::Input, *};
     use crate::{
-        auxinfo, threshold::lagrange_coefficient_at_zero, utils::{bn_to_scalar, testing::init_testing_with_seed}, Identifier, ParticipantConfig
+        auxinfo,
+        threshold::lagrange_coefficient_at_zero,
+        utils::{bn_to_scalar, testing::init_testing_with_seed},
+        Identifier, ParticipantConfig,
     };
+    use k256::Scalar;
     use rand::{CryptoRng, Rng, RngCore};
-    use std::{
-        collections::HashMap,
-        iter::zip,
-    };
+    use std::{collections::HashMap, iter::zip};
     use tracing::debug;
 
     impl TshareParticipant {
@@ -977,7 +977,9 @@ mod tests {
     fn tshare_produces_valid_outputs(quorum_size: usize) -> Result<()> {
         let mut rng = init_testing_with_seed(Default::default());
         let sid = Identifier::random(&mut rng);
-        let test_share = Some(CoeffPrivate { x: BigNumber::from(42) });
+        let test_share = Some(CoeffPrivate {
+            x: BigNumber::from(42),
+        });
         let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, test_share, &mut rng)?;
         let mut inboxes = HashMap::new();
         for participant in &quorum {
@@ -1055,12 +1057,18 @@ mod tests {
             assert_eq!(public_share, expected_public_share);
         }
 
-        let all_participants = quorum.iter().map(|x| Scalar::from(x.id.as_u128()+1u128)).collect::<Vec<Scalar>>();
+        let all_participants = quorum
+            .iter()
+            .map(|x| Scalar::from(x.id.as_u128() + 1u128))
+            .collect::<Vec<Scalar>>();
 
         // Test lagrange_coefficient_at_zero return the correct coefficients in order to recompute the sum of initial additive shares
         let mut sum_lagrange = Scalar::ZERO;
         let mut sum_input_shares = Scalar::ZERO;
-        for (input, (output, pid)) in inputs.iter().zip(outputs.iter().zip(all_participants.clone())) {
+        for (input, (output, pid)) in inputs
+            .iter()
+            .zip(outputs.iter().zip(all_participants.clone()))
+        {
             if let Some(share) = input.share() {
                 let pid_scalar = Scalar::from(pid);
                 let input_share_scalar = bn_to_scalar(&share.x)?;
@@ -1072,33 +1080,6 @@ mod tests {
             return Ok(());
         }
         assert_eq!(sum_lagrange, sum_input_shares);
-
-
-        //for (input, output) in inputs.iter().zip(outputs) {
-            // TODO. Check the shared value has not changed.
-            // Check that the input and output are consistent.
-
-            // All shares have changed.
-            /*
-            let public_shares_before = input
-                .public_key_shares()
-                .iter()
-                .map(|key_share| serialize!(key_share.as_ref()).unwrap())
-                .collect::<HashSet<_>>();
-
-            let public_shares_after = output
-                .public_key_shares()
-                .iter()
-                .map(|key_share| serialize!(key_share.as_ref()).unwrap())
-                .collect::<HashSet<_>>();
-
-            public_shares_before
-                .intersection(&public_shares_after)
-                .for_each(|_| {
-                    panic!("All public key shares must change.");
-                });
-            */
-        //}
 
         Ok(())
     }

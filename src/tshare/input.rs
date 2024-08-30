@@ -33,7 +33,11 @@ impl Input {
     /// Creates a new [`Input`] from the outputs of the
     /// [`auxinfo`](crate::auxinfo::AuxInfoParticipant) and
     /// [`keygen`](crate::keygen::KeygenParticipant) protocols.
-    pub fn new(auxinfo_output: auxinfo::Output, share: Option<CoeffPrivate>, threshold: usize) -> Result<Self> {
+    pub fn new(
+        auxinfo_output: auxinfo::Output,
+        share: Option<CoeffPrivate>,
+        threshold: usize,
+    ) -> Result<Self> {
         // The constructor for auxinfo output already check other important
         // properties, like that the private component maps to one of public
         // components for each one.
@@ -114,17 +118,17 @@ mod test {
         let SIZE = 5;
 
         // Create valid input set with random PIDs
-        let config = ParticipantConfig::random(5, rng);
+        let config = ParticipantConfig::random(SIZE, rng);
         let auxinfo_output = auxinfo::Output::simulate(&config.all_participants(), rng);
         let input = Input::new(auxinfo_output, None, 2)?;
 
         // Create valid config with PIDs independent of those used to make the input set
-        let config = ParticipantConfig::random(SIZE, rng);
+        let independent_config = ParticipantConfig::random(SIZE, rng);
 
         let result = TshareParticipant::new(
             Identifier::random(rng),
-            config.id(),
-            config.other_ids().to_vec(),
+            independent_config.id(),
+            independent_config.other_ids().to_vec(),
             input,
         );
         assert!(result.is_err());
@@ -132,9 +136,39 @@ mod test {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::BadInput)
         );
+        
+        Ok(())
+    }
+
+    #[test]
+    fn auxinfo_must_match_input_participants() -> Result<()> {
+        let rng = &mut init_testing();
+        let SIZE = 5;
+
+        // Create valid input set with random PIDs
+        let config = ParticipantConfig::random(SIZE, rng);
+
+        // Create valid config with PIDs independent of those used to make the input set
+        let independent_config = ParticipantConfig::random(SIZE, rng);
+
+        // Replace auxinfo_output with a new one that doesn't match the config
+        let mut auxinfo_output = auxinfo::Output::simulate(&independent_config.all_participants(), rng);
+        let input_with_invalid_auxinfo = Input::new(auxinfo_output, None, 2)?;
+        let result = TshareParticipant::new(
+            Identifier::random(rng),
+            config.id(),
+            config.other_ids().to_vec(),
+            input_with_invalid_auxinfo,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
 
         Ok(())
     }
 
-    // TODO: tests for other invalid inputs.
+
 }

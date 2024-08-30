@@ -41,7 +41,6 @@ pub fn lagrange_coefficient(my_point: &Scalar, other_points: &Vec<Scalar>) -> Sc
     result
 }
 
-
 fn evaluate_at_points(coefficients: &Vec<Scalar>, points: &Vec<Scalar>) -> Vec<Scalar> {
     points
         .iter()
@@ -62,15 +61,15 @@ mod tests {
 
         let x = Scalar::random(&mut rng);
         let value = evaluate_polynomial(&coefficients, &x);
-        
+
         // Just to check if we got something
         // non-trivial
-        assert!(!bool::from(value.is_zero())); 
+        assert!(!bool::from(value.is_zero()));
     }
 
     #[test]
     fn test_lagrange_coefficients() {
-        let points: Vec<Scalar> = (1..=3).map(|i:u32| Scalar::from(i)).collect();
+        let points: Vec<Scalar> = (1..=3).map(|i: u32| Scalar::from(i)).collect();
         // Next we represent the polynomial x^2 + x
         let evaluated_values = vec![
             points[0] * Scalar::from(2u32),
@@ -83,10 +82,10 @@ mod tests {
             .zip(&points)
             .map(|(value, point)| *value * lagrange_coefficient(point, &points))
             .fold(Scalar::ZERO, |acc, x| acc + x);
-        
+
         // Check that reconstructed value
         // at X=0 is correct
-        assert!(bool::from(reconstructed_zero.is_zero())); 
+        assert!(bool::from(reconstructed_zero.is_zero()));
     }
 
     #[test]

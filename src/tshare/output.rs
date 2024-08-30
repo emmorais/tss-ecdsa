@@ -5,8 +5,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::collections::HashSet;
 use libpaillier::unknown_order::BigNumber;
+use std::collections::HashSet;
 
 use crate::{
     errors::{CallerError, InternalError, Result},
@@ -59,8 +59,8 @@ impl Output {
     /// The provided components must satisfy the following properties:
     /// - There is a valid key pair -- that is, the public key corresponding to
     ///   the private key share must be contained in the list of public shares.
-    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant term form a key pair with this constant, 
-    /// but this constant is not what is stored in the private key share, which is an evaluation of the polynomial 
+    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant term form a key pair with this constant,
+    /// but this constant is not what is stored in the private key share, which is an evaluation of the polynomial
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
         public_coeffs: Vec<KeySharePublic>,
@@ -70,6 +70,8 @@ impl Output {
             .iter()
             .map(KeySharePublic::participant)
             .collect::<HashSet<_>>();
+        dbg!(pids.len());
+        dbg!(public_coeffs.len());
         if pids.len() != public_coeffs.len() {
             error!("Tried to create a keygen output using a set of public material from non-unique participants");
             Err(CallerError::BadInput)?
@@ -98,7 +100,10 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::{k256_order, testing::init_testing}, ParticipantIdentifier};
+    use crate::{
+        utils::{k256_order, testing::init_testing},
+        ParticipantIdentifier,
+    };
 
     impl Output {
         /// Simulate the valid output of a keygen run with the given
@@ -106,15 +111,15 @@ mod tests {
         ///
         /// This should __never__ be called outside of tests! The given `pids`
         /// must not contain duplicates. Self is the last participant in `pids`.
-        pub(crate) fn simulate(
-            pids: &[ParticipantIdentifier],
-        ) -> Self {
+        pub(crate) fn simulate(pids: &[ParticipantIdentifier]) -> Self {
             let (mut private_key_shares, public_key_shares): (Vec<_>, Vec<_>) = pids
                 .iter()
                 .map(|&pid| {
                     // TODO #340: Replace with KeyShare methods once they exist.
                     let secret = BigNumber::random(&k256_order());
-                    let public = CurvePoint::GENERATOR.multiply_by_bignum(&secret).expect("can't multiply by generator");
+                    let public = CurvePoint::GENERATOR
+                        .multiply_by_bignum(&secret)
+                        .expect("can't multiply by generator");
                     (secret, KeySharePublic::new(pid, public))
                 })
                 .unzip();
@@ -170,7 +175,9 @@ mod tests {
             .map(|&pid| {
                 // TODO #340: Replace with KeyShare methods once they exist.
                 let secret = BigNumber::random(&k256_order());
-                let public = CurvePoint::GENERATOR.multiply_by_bignum(&secret).expect("can't multiply by generator");
+                let public = CurvePoint::GENERATOR
+                    .multiply_by_bignum(&secret)
+                    .expect("can't multiply by generator");
                 (secret, KeySharePublic::new(pid, public))
             })
             .unzip();

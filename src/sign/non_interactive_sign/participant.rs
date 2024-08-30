@@ -19,7 +19,17 @@ use tracing::{error, info};
 use zeroize::Zeroize;
 
 use crate::{
-    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, local_storage::LocalStorage, messages::{Message, MessageType, SignMessageType}, participant::{InnerProtocolParticipant, ProcessOutcome, Status}, protocol::{ProtocolType, SharedContext}, run_only_once, sign::{non_interactive_sign::share::SignatureShare, Signature}, utils::CurvePoint, zkp::ProofContext, Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant
+    errors::{CallerError, InternalError, Result},
+    keygen::KeySharePublic,
+    local_storage::LocalStorage,
+    messages::{Message, MessageType, SignMessageType},
+    participant::{InnerProtocolParticipant, ProcessOutcome, Status},
+    protocol::{ProtocolType, SharedContext},
+    run_only_once,
+    sign::{non_interactive_sign::share::SignatureShare, Signature},
+    utils::CurvePoint,
+    zkp::ProofContext,
+    Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant,
 };
 
 /// A participant that runs the non-interactive signing protocol in Figure 8 of
@@ -297,7 +307,6 @@ impl InnerProtocolParticipant for SignParticipant {
 }
 
 impl SignParticipant {
-
     /// Handle a "Ready" message from ourselves.
     ///
     /// Once a "Ready" message has been received, continue to generate the round
@@ -554,7 +563,12 @@ mod test {
 
         // Form signing inputs and participants
         let inputs = std::iter::zip(keygen_outputs, presign_records).map(|(keygen, record)| {
-            sign::Input::new(message, record, keygen.public_key_shares().to_vec(), quorum_size)
+            sign::Input::new(
+                message,
+                record,
+                keygen.public_key_shares().to_vec(),
+                quorum_size,
+            )
         });
         let mut quorum = std::iter::zip(configs, inputs)
             .map(|(config, input)| {
