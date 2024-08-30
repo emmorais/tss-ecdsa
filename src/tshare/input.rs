@@ -166,9 +166,35 @@ mod test {
             InternalError::CallingApplicationMistake(CallerError::BadInput)
         );
 
-
         Ok(())
     }
 
+    #[test]
+    fn auxinfo_id_must_match_input_participants() -> Result<()> {
+        let rng = &mut init_testing();
+        let SIZE = 5;
 
+        // Create valid input set with random PIDs
+        let config = ParticipantConfig::random(SIZE, rng);
+
+        // create quorum
+        let quorum = ParticipantConfig::random_quorum(SIZE, rng).unwrap();
+
+        // Replace auxinfo_output with a new one that doesn't match the config
+        let mut auxinfo_output = auxinfo::Output::simulate(&quorum[0].all_participants(), rng);
+        let input_auxinfo = Input::new(auxinfo_output, None, 2)?;
+        let result = TshareParticipant::new(
+            Identifier::random(rng),
+            quorum[1].id(),
+            quorum[1].other_ids().to_vec(),
+            input_auxinfo,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
+        Ok(())
+    }
 }
