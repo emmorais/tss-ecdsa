@@ -16,7 +16,7 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Add};
 use tracing::error;
 use zeroize::ZeroizeOnDrop;
 
@@ -147,6 +147,16 @@ impl AsRef<CurvePoint> for CoeffPublic {
     /// Get the coeff as a curve point.
     fn as_ref(&self) -> &CurvePoint {
         &self.X
+    }
+}
+
+impl Add<&CoeffPublic> for CoeffPublic {
+    type Output = Self;
+
+    fn add(self, rhs: &CoeffPublic) -> Self::Output {
+        CoeffPublic {
+            X: self.X + rhs.X,
+        }
     }
 }
 
