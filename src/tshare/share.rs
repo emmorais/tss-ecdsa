@@ -63,7 +63,8 @@ impl EvalEncrypted {
 /// Private coefficient share.
 #[derive(Clone, ZeroizeOnDrop, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoeffPrivate {
-    pub x: BigNumber, // in the range [1, q)
+    /// A BigNumber element in the range [1, q) representing a polynomial coefficient 
+    pub x: BigNumber, 
 }
 
 impl Debug for CoeffPrivate {
@@ -100,7 +101,7 @@ impl CoeffPrivate {
         CurvePoint::GENERATOR.multiply_by_bignum(&self.x)
     }
 
-    pub(crate) fn to_public(&self, participant: ParticipantIdentifier) -> Result<CoeffPublic> {
+    pub(crate) fn to_public(&self) -> Result<CoeffPublic> {
         Ok(CoeffPublic::new(self.public_point()?))
     }
 }
@@ -128,11 +129,10 @@ impl CoeffPublic {
 
     /// Generate a new [`CoeffPrivate`] and [`CoeffPublic`].
     pub(crate) fn new_pair<R: RngCore + CryptoRng>(
-        participant: ParticipantIdentifier,
         rng: &mut R,
     ) -> Result<(CoeffPrivate, CoeffPublic)> {
         let private_share = CoeffPrivate::random(rng);
-        let public_share = private_share.to_public(participant)?;
+        let public_share = private_share.to_public()?;
         Ok((private_share, public_share))
     }
 

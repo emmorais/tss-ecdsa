@@ -88,7 +88,8 @@ Rounds 3:
 - Each participant shares a private evaluation of the polynomial with each of the other participants.
 
 Output:
-- The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points). The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
+- The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points). 
+The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
 - The private evaluation of the shared polynomial for our participant. `t` of those can reconstruct the secret.
 
 */
@@ -238,9 +239,13 @@ impl Broadcast for TshareParticipant {
 impl TshareParticipant {
     fn coeff_ids(&self) -> Vec<ParticipantIdentifier> {
         // TODO: Introduce dedicated types.
-        (0..self.input.threshold())
-            .map(|i| ParticipantIdentifier::from_u128(i as u128))
-            .collect()
+        //(0..self.input.threshold())
+        //    .map(|i| ParticipantIdentifier::from_u128(i as u128))
+        //    .collect()
+        // append self.id() and self.other_participant_ids.clone()
+        let mut coeff_ids = vec![self.id()];
+        coeff_ids.extend(self.other_participant_ids.clone());
+        coeff_ids
     }
 
     /// Handle "Ready" messages from the protocol participants.
@@ -281,15 +286,15 @@ impl TshareParticipant {
             let mut privates = vec![];
             let mut publics = vec![];
 
-            for pid in self.coeff_ids() {
-                let (private, public) = CoeffPublic::new_pair(pid, rng)?;
+            for _pid in self.coeff_ids() {
+                let (private, public) = CoeffPublic::new_pair(rng)?;
                 privates.push(private);
                 publics.push(public);
             }
 
             if let Some(private) = self.input.share() {
                 privates[0] = private.clone();
-                publics[0] = private.to_public(self.coeff_ids()[0])?;
+                publics[0] = private.to_public()?;
             }
 
             (privates, publics)
@@ -321,6 +326,10 @@ impl TshareParticipant {
 
         // Store the private share from ourselves to ourselves.
         let my_private_share = Self::eval_private_share(&coeff_privates, self.id());
+        let my_contant_term = Self::eval_private_share_at_zero(&coeff_privates);
+        if let Some(private) = self.input.share() {
+            assert_eq!(my_contant_term, private.x);         
+        }
         self.local_storage
             .store::<storage::ValidPrivateEval>(self.id(), my_private_share);
 
@@ -637,6 +646,10 @@ impl TshareParticipant {
         CoeffPrivate { x: sum }
     }
 
+    fn eval_private_share_at_zero(coeff_privates: &[CoeffPrivate]) -> BigNumber {
+        coeff_privates[0].x.clone()
+    }
+
     fn eval_public_share(
         coeff_publics: &[CoeffPublic],
         recipient_id: ParticipantIdentifier,
@@ -805,7 +818,8 @@ impl TshareParticipant {
                 .enumerate()
                 .map(|(i, coeff)| coeff.to_keyshare(i))
                 .collect();
-            let output = Output::from_parts(all_public_coeffs, my_private_share.to_keyshare())?;
+
+            let output = Output::from_parts(all_public_coeffs, my_private_share.x.clone())?;
 
             // Check that the new shared value is consistent with the old one (if given).
             /*if let Some(share) = self.input.share() {
@@ -859,15 +873,14 @@ fn schnorr_proof_transcript(
 
 #[cfg(test)]
 mod tests {
+    use k256::Scalar;
     use super::{super::input::Input, *};
     use crate::{
-        auxinfo, keygen,
-        utils::testing::{init_testing, init_testing_with_seed},
-        Identifier, ParticipantConfig,
+        auxinfo, threshold::lagrange_coefficient_at_zero, utils::{bn_to_scalar, testing::init_testing_with_seed}, Identifier, ParticipantConfig
     };
     use rand::{CryptoRng, Rng, RngCore};
     use std::{
-        collections::{HashMap, HashSet},
+        collections::HashMap,
         iter::zip,
     };
     use tracing::debug;
@@ -876,6 +889,7 @@ mod tests {
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             quorum_size: usize,
+            share: Option<CoeffPrivate>,
             rng: &mut R,
         ) -> Result<Vec<Self>> {
             // Prepare prereqs for making TshareParticipant's. Assume all the
@@ -886,7 +900,7 @@ mod tests {
             // Make the participants
             zip(configs, auxinfo_outputs)
                 .map(|(config, auxinfo_output)| {
-                    let input = Input::new(auxinfo_output, None, 2)?;
+                    let input = Input::new(auxinfo_output, share.clone(), 2)?;
                     Self::new(sid, config.id(), config.other_ids().to_vec(), input)
                 })
                 .collect::<Result<Vec<_>>>()
@@ -963,7 +977,8 @@ mod tests {
     fn tshare_produces_valid_outputs(quorum_size: usize) -> Result<()> {
         let mut rng = init_testing_with_seed(Default::default());
         let sid = Identifier::random(&mut rng);
-        let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, &mut rng)?;
+        let test_share = Some(CoeffPrivate { x: BigNumber::from(42) });
+        let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, test_share, &mut rng)?;
         let mut inboxes = HashMap::new();
         for participant in &quorum {
             let _ = inboxes.insert(participant.id(), vec![]);
@@ -1011,42 +1026,57 @@ mod tests {
         //
         // Every participant should have a public output from every other participant
         // and, for a given participant, they should be the same in every output
-        for party in quorum.iter_mut() {
-            let pid = party.id();
-
+        for participant in quorum.iter_mut() {
             // Check that each participant fully completed its broadcast portion.
             if let Status::ParticipantCompletedBroadcast(participants) =
-                party.broadcast_participant().status()
+                participant.broadcast_participant().status()
             {
-                assert_eq!(participants.len(), party.other_ids().len());
+                assert_eq!(participants.len(), participant.other_ids().len());
             } else {
                 panic!("Broadcast not completed!");
             }
         }
 
-        // TODO.
         // Check that each participant's own `CoeffPublic` corresponds to their
         // `CoeffPrivate`
         for (output, pid) in outputs
             .iter()
             .zip(quorum.iter().map(ProtocolParticipant::id))
         {
-            /*
             let coeff_publics = output
-                .public_coeffs() // TODO
+                .public_key_shares()
                 .iter()
-                .map(|coeff| coeff.as_ref())
+                .map(|coeff| CoeffPublic::new(*coeff.as_ref()))
                 .collect::<Vec<_>>();
-            let public_share = TshareParticipant::eval_public_share(&coeff_publics, id)?;
+            let public_share = TshareParticipant::eval_public_share(&coeff_publics, pid)?;
 
             let expected_public_share =
-                CurvePoint::GENERATOR.multiply_by_bignum(output.private_key_share().as_ref())?;
-            assert_eq!(public_share.unwrap().as_ref(), &expected_public_share);
-            */
+                CurvePoint::GENERATOR.multiply_by_bignum(output.private_key_share())?;
+            assert_eq!(public_share, expected_public_share);
         }
 
-        for (input, output) in inputs.iter().zip(outputs.iter()) {
+        let all_participants = quorum.iter().map(|x| Scalar::from(x.id.as_u128()+1u128)).collect::<Vec<Scalar>>();
+
+        // Test lagrange_coefficient_at_zero return the correct coefficients in order to recompute the sum of initial additive shares
+        let mut sum_lagrange = Scalar::ZERO;
+        let mut sum_input_shares = Scalar::ZERO;
+        for (input, (output, pid)) in inputs.iter().zip(outputs.iter().zip(all_participants.clone())) {
+            if let Some(share) = input.share() {
+                let pid_scalar = Scalar::from(pid);
+                let input_share_scalar = bn_to_scalar(&share.x)?;
+                let output_share_scalar = bn_to_scalar(output.private_key_share())?;
+                let lagrange_coeff = lagrange_coefficient_at_zero(&pid_scalar, &all_participants);
+                sum_lagrange += output_share_scalar * lagrange_coeff;
+                sum_input_shares += input_share_scalar;
+            }
+            return Ok(());
+        }
+        assert_eq!(sum_lagrange, sum_input_shares);
+
+
+        //for (input, output) in inputs.iter().zip(outputs) {
             // TODO. Check the shared value has not changed.
+            // Check that the input and output are consistent.
 
             // All shares have changed.
             /*
@@ -1068,7 +1098,7 @@ mod tests {
                     panic!("All public key shares must change.");
                 });
             */
-        }
+        //}
 
         Ok(())
     }

@@ -6,12 +6,12 @@
 // of this source tree.
 
 use std::collections::HashSet;
+use libpaillier::unknown_order::BigNumber;
 
 use crate::{
     errors::{CallerError, InternalError, Result},
-    keygen::{KeySharePrivate, KeySharePublic},
+    keygen::KeySharePublic,
     utils::CurvePoint,
-    ParticipantIdentifier,
 };
 
 use k256::ecdsa::VerifyingKey;
@@ -22,7 +22,8 @@ use tracing::error;
 #[derive(Debug, Clone)]
 pub struct Output {
     public_key_shares: Vec<KeySharePublic>,
-    private_key_share: KeySharePrivate,
+    //private_key_share: KeySharePrivate,
+    private_key_share: BigNumber,
 }
 
 impl Output {
@@ -45,25 +46,8 @@ impl Output {
         &self.public_key_shares
     }
 
-    pub(crate) fn private_key_share(&self) -> &KeySharePrivate {
+    pub(crate) fn private_key_share(&self) -> &BigNumber {
         &self.private_key_share
-    }
-
-    /// Get the [`ParticipantIdentifier`] corresponding to the
-    /// [`KeySharePrivate`].
-    pub(crate) fn private_pid(&self) -> Result<ParticipantIdentifier> {
-        let expected_public_share = self.private_key_share.public_share()?;
-        match self
-            .public_key_shares
-            .iter()
-            .find(|share| share.as_ref() == &expected_public_share)
-        {
-            Some(public_key_share) => Ok(public_key_share.participant()),
-            None => {
-                error!("Didn't find a public key share corresponding to the private key share, but there should be one by construction");
-                Err(InternalError::InternalInvariantFailed)
-            }
-        }
     }
 
     /// Create a new `Output` from its constitutent parts.
@@ -75,10 +59,12 @@ impl Output {
     /// The provided components must satisfy the following properties:
     /// - There is a valid key pair -- that is, the public key corresponding to
     ///   the private key share must be contained in the list of public shares.
+    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant term form a key pair with this constant, 
+    /// but this constant is not what is stored in the private key share, which is an evaluation of the polynomial 
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
         public_coeffs: Vec<KeySharePublic>,
-        private_key_share: KeySharePrivate,
+        private_key_share: BigNumber,
     ) -> Result<Self> {
         let pids = public_coeffs
             .iter()
@@ -104,7 +90,7 @@ impl Output {
     ///
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
-    pub fn into_parts(self) -> (Vec<KeySharePublic>, KeySharePrivate) {
+    pub fn into_parts(self) -> (Vec<KeySharePublic>, BigNumber) {
         (self.public_key_shares, self.private_key_share)
     }
 }
@@ -112,8 +98,7 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::testing::init_testing, ParticipantIdentifier};
-    use rand::{CryptoRng, RngCore};
+    use crate::{utils::{k256_order, testing::init_testing}, ParticipantIdentifier};
 
     impl Output {
         /// Simulate the valid output of a keygen run with the given
@@ -123,14 +108,13 @@ mod tests {
         /// must not contain duplicates. Self is the last participant in `pids`.
         pub(crate) fn simulate(
             pids: &[ParticipantIdentifier],
-            rng: &mut (impl CryptoRng + RngCore),
         ) -> Self {
             let (mut private_key_shares, public_key_shares): (Vec<_>, Vec<_>) = pids
                 .iter()
                 .map(|&pid| {
                     // TODO #340: Replace with KeyShare methods once they exist.
-                    let secret = KeySharePrivate::random(rng);
-                    let public = secret.public_share().unwrap();
+                    let secret = BigNumber::random(&k256_order());
+                    let public = CurvePoint::GENERATOR.multiply_by_bignum(&secret).expect("can't multiply by generator");
                     (secret, KeySharePublic::new(pid, public))
                 })
                 .unzip();
@@ -145,13 +129,14 @@ mod tests {
         let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(5)
             .collect::<Vec<_>>();
-        let output = Output::simulate(&pids, rng);
+        let output = Output::simulate(&pids);
 
         let (public, private) = output.into_parts();
         assert!(Output::from_parts(public, private).is_ok());
     }
 
-    #[test]
+    //#[test]
+    /* TODO: the private key is not part of the output, it is a PrivateCoeff
     fn private_field_must_correspond_to_a_public() {
         let rng = &mut init_testing();
         let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
@@ -159,18 +144,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         // Use the simulate function to get a set of valid public components
-        let output = Output::simulate(&pids, rng);
+        let output = Output::simulate(&pids);
 
         // Create a random private share. It's legally possible for this to match one of
         // the public keys but it's so unlikely that we won't check it.
-        let bad_private_key_share = KeySharePrivate::random(rng);
+        let bad_private_key_share = BigNumber::random(&k256_order());
 
         // TODO: move the check from TshareParticipant::maybe_finish here.
-        //assert!(
-        //    Output::from_parts(output.public_key_shares,
-        // bad_private_key_share, output.rid)        .is_err()
-        //)
-    }
+        assert!(Output::from_parts(output.public_key_shares, bad_private_key_share).is_err())
+    }*/
 
     #[test]
     fn public_shares_must_not_have_duplicate_pids() {
@@ -187,8 +169,8 @@ mod tests {
             .iter()
             .map(|&pid| {
                 // TODO #340: Replace with KeyShare methods once they exist.
-                let secret = KeySharePrivate::random(rng);
-                let public = secret.public_share().unwrap();
+                let secret = BigNumber::random(&k256_order());
+                let public = CurvePoint::GENERATOR.multiply_by_bignum(&secret).expect("can't multiply by generator");
                 (secret, KeySharePublic::new(pid, public))
             })
             .unzip();

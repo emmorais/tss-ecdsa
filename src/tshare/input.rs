@@ -44,14 +44,17 @@ impl Input {
         })
     }
 
+    /// Returns the share to be used in the protocol.
     pub fn share(&self) -> Option<&CoeffPrivate> {
         self.share.as_ref()
     }
 
+    /// Returns the threshold for the protocol.
     pub fn threshold(&self) -> usize {
         self.threshold
     }
 
+    /// Returns the participant IDs associated with the auxinfo output.
     fn auxinfo_pids(&self) -> HashSet<ParticipantIdentifier> {
         self.auxinfo_output
             .public_auxinfo()
@@ -101,7 +104,6 @@ mod test {
     use crate::{
         auxinfo,
         errors::{CallerError, InternalError, Result},
-        keygen,
         utils::testing::init_testing,
         Identifier, ParticipantConfig, ProtocolParticipant,
     };

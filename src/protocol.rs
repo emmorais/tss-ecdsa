@@ -607,10 +607,9 @@ impl std::fmt::Display for Identifier {
 
 #[cfg(test)]
 mod tests {
-    use k256::elliptic_curve::PrimeField;
     use super::*;
     use crate::{
-        auxinfo::AuxInfoParticipant, keygen::KeygenParticipant, participant::Status, presign, sign::{self, InteractiveSignParticipant, SignParticipant}, tshare::{self, CoeffPrivate, TshareParticipant}, utils::testing::init_testing, PresignParticipant
+        auxinfo::AuxInfoParticipant, keygen::KeygenParticipant, participant::Status, presign, sign::{self, InteractiveSignParticipant, SignParticipant}, utils::testing::init_testing, PresignParticipant,
     };
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
@@ -811,14 +810,13 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
-        println!("All tests");
         let result = full_protocol_execution_with_noninteractive_signing_works(3, 3, 3);
         assert!(result.is_ok());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(r: usize, t: usize, n: usize) -> Result<()> {
         let mut rng = init_testing();
-        let QUORUM_REAL = r; // only r participants are going to participate
+        let _QUORUM_REAL = r; // TODO: only r participants are going to participate, but for now r = n
         let QUORUM_THRESHOLD = t; // threshold t
         let QUORUM_SIZE = n; // total number of participants
         // Set GLOBAL config for participants
@@ -974,155 +972,6 @@ mod tests {
             .iter()
             .all(|p| *p.status() == Status::TerminatedSuccessfully));
 
-        ///////////////////////////////////////////////////////////////////////
-        /// Tshare: BEGIN k
-        ///////////////////////////////////////////////////////////////////////
-        let mut presign_outputs_tshare_k = presign_outputs.clone();
-        let mut auxinfo_outputs_tshare_k = auxinfo_outputs.clone();
-        
-        // Set up presign participants
-        let tshare_k_sid = Identifier::random(&mut rng);
-
-        // mask_share stores variables k from the paper 
-        // TODO: connect the wires... the output of presign must be the input of tshare
-        // Prepare tshare inputs: output from presign and auxinfo.
-        let tshare_k_inputs = configs
-            .iter()
-            .map(|config| {
-                (
-                    auxinfo_outputs_tshare_k.remove(&config.id()).unwrap(),
-                    presign_outputs_tshare_k.remove(&config.id()).unwrap(),
-                )
-            })
-            .map(|(auxinfo_output, presign_output)| {
-                // convert the mask_share to CoeffPrivate
-                let mask_bn = BigNumber::from_slice(presign_output.mask_share().to_repr());
-                tshare::Input::new(
-                    auxinfo_output, 
-                    Some(CoeffPrivate { x: mask_bn }), 
-                        QUORUM_THRESHOLD
-                    ).unwrap()
-                //tshare::Input::new(auxinfo_output, None, QUORUM_THRESHOLD).unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let mut tshare_k_quorum = configs
-            .clone()
-            .into_iter()
-            .zip(tshare_k_inputs)
-            .map(|(config, input)| {
-                Participant::<TshareParticipant>::from_config(config, tshare_k_sid, input).unwrap()
-            })
-            .collect::<Vec<_>>();
-        let mut tshare_outputs_k: HashMap<
-            ParticipantIdentifier,
-            <TshareParticipant as ProtocolParticipant>::Output,
-        > = HashMap::new();
-
-        for participant in &mut tshare_k_quorum {
-            let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_message()?);
-        }
-
-        while tshare_outputs_k.len() < QUORUM_SIZE {
-            let output = process_random_message(&mut tshare_k_quorum, &mut inboxes, &mut rng)?;
-
-            if let Some((pid, output)) = output {
-                // Save the output, and make sure this participant didn't already return an
-                // output.
-                assert!(tshare_outputs_k.insert(pid, output).is_none());
-            }
-        }
-
-        // Tshare is done! Make sure there are no more messages.
-        assert!(inboxes_are_empty(&inboxes));
-        // And make sure all participants have successfully terminated.
-        assert!(tshare_k_quorum
-            .iter()
-            .all(|p| *p.status() == Status::TerminatedSuccessfully));
-        
-        ///////////////////////////////////////////////////////////////////////
-        /// Tshare: BEGIN chi
-        ///////////////////////////////////////////////////////////////////////
-        let mut presign_outputs_tshare_chi = presign_outputs.clone();
-        let mut auxinfo_outputs_tshare_chi = auxinfo_outputs.clone();
-        
-        // Set up presign participants
-        let tshare_chi_sid = Identifier::random(&mut rng);
-
-        // mask_share stores variables k from the paper 
-        // TODO: connect the wires... the output of presign must be the input of tshare
-        // Prepare tshare inputs: output from presign and auxinfo.
-        let tshare_chi_inputs = configs
-            .iter()
-            .map(|config| {
-                (
-                    auxinfo_outputs_tshare_chi.remove(&config.id()).unwrap(),
-                    presign_outputs_tshare_chi.remove(&config.id()).unwrap(),
-                )
-            })
-            .map(|(auxinfo_output, presign_output)| {
-                // convert the mask_share to CoeffPrivate
-                let mask_bn = BigNumber::from_slice(presign_output.mask_share().to_repr());
-                tshare::Input::new(
-                    auxinfo_output, 
-                    Some(CoeffPrivate { x: mask_bn }), 
-                        QUORUM_THRESHOLD
-                    ).unwrap()
-                //tshare::Input::new(auxinfo_output, None, QUORUM_THRESHOLD).unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let mut tshare_chi_quorum = configs
-            .clone()
-            .into_iter()
-            .zip(tshare_chi_inputs)
-            .map(|(config, input)| {
-                Participant::<TshareParticipant>::from_config(config, tshare_chi_sid, input).unwrap()
-            })
-            .collect::<Vec<_>>();
-        let mut tshare_outputs_chi: HashMap<
-            ParticipantIdentifier,
-            <TshareParticipant as ProtocolParticipant>::Output,
-        > = HashMap::new();
-
-        for participant in &mut tshare_chi_quorum {
-            let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_message()?);
-        }
-
-        while tshare_outputs_chi.len() < QUORUM_SIZE {
-            let output = process_random_message(&mut tshare_chi_quorum, &mut inboxes, &mut rng)?;
-
-            if let Some((pid, output)) = output {
-                // Save the output, and make sure this participant didn't already return an
-                // output.
-                assert!(tshare_outputs_chi.insert(pid, output).is_none());
-            }
-        }
-
-        // Tshare is done! Make sure there are no more messages.
-        assert!(inboxes_are_empty(&inboxes));
-        // And make sure all participants have successfully terminated.
-        assert!(tshare_chi_quorum
-            .iter()
-            .all(|p| *p.status() == Status::TerminatedSuccessfully));
-
-
-        // TODO: delete n-r participants from configs
-
-        // TODO: if less than t participants are present, then the protocol should fail
-
-        // TODO: adapt signature for threshold
-        
-        ///////////////////////////////////////////////////////////////////////
-        /// Lagrange: BEGIN
-        ///////////////////////////////////////////////////////////////////////
-
-        ///////////////////////////////////////////////////////////////////////
-        /// Lagrange: E
-        ///////////////////////////////////////////////////////////////////////
-        
         // Set the message and SID
         let message = b"Testing full protocol execution with non-interactive signing protocol";
         let digest = Keccak256::new_with_prefix(message);
@@ -1130,8 +979,11 @@ mod tests {
 
         // Make signing participants
         let mut sign_quorum = configs
+            .clone()
             .into_iter()
             .map(|config| {
+                //dbg!(config.id());
+                //let record = presign_outputs.remove(&config.id()).unwrap();
                 let record = presign_outputs.remove(&config.id()).unwrap();
                 let input = sign::Input::new(message, record, public_key_shares.clone(), QUORUM_THRESHOLD);
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)

@@ -19,7 +19,7 @@ use tracing::{error, info};
 use zeroize::Zeroize;
 
 use crate::{
-    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, local_storage::LocalStorage, messages::{Message, MessageType, SignMessageType}, participant::{InnerProtocolParticipant, ProcessOutcome, Status}, protocol::{ProtocolType, SharedContext}, run_only_once, sign::{non_interactive_sign::share::SignatureShare, Signature}, threshold, utils::CurvePoint, zkp::ProofContext, Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant
+    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, local_storage::LocalStorage, messages::{Message, MessageType, SignMessageType}, participant::{InnerProtocolParticipant, ProcessOutcome, Status}, protocol::{ProtocolType, SharedContext}, run_only_once, sign::{non_interactive_sign::share::SignatureShare, Signature}, utils::CurvePoint, zkp::ProofContext, Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant
 };
 
 /// A participant that runs the non-interactive signing protocol in Figure 8 of
@@ -69,7 +69,8 @@ pub struct Input {
     digest: Keccak256,
     presign_record: PresignRecord,
     public_key_shares: Vec<KeySharePublic>,
-    threshold: usize,
+    //TODO: add threshold field
+    //threshold: usize,
 }
 
 impl Input {
@@ -81,13 +82,13 @@ impl Input {
         message: &[u8],
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-        threshold: usize,
+        _threshold: usize,
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
             presign_record: record,
             public_key_shares,
-            threshold,
+            //threshold,
         }
     }
 
@@ -99,13 +100,13 @@ impl Input {
         digest: Keccak256,
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-        threshold: usize,
+        _threshold: usize,
     ) -> Self {
         Self {
             digest,
             presign_record: record,
             public_key_shares,
-            threshold,
+            //threshold,
         }
     }
 
@@ -296,6 +297,7 @@ impl InnerProtocolParticipant for SignParticipant {
 }
 
 impl SignParticipant {
+
     /// Handle a "Ready" message from ourselves.
     ///
     /// Once a "Ready" message has been received, continue to generate the round
@@ -395,17 +397,23 @@ impl SignParticipant {
     fn compute_output(&mut self) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         // Retrieve everyone's share and the x-projection we saved in round one
         // (This will fail if we're missing any shares)
+        // TODO: if less than t participants are present, then the protocol should fail (in a different place? first round?)
+
+        //let mut sum = self.aggregate_lagrange_at_zero()?;
         let shares = self
             .all_participants()
             .into_iter()
             .map(|pid| self.storage.remove::<storage::Share>(pid))
             .collect::<Result<Vec<_>>>()?;
+
+        // Retrieve everyone's id and share
+
         let x_projection = self.storage.remove::<storage::XProj>(self.id())?;
 
         // Sum up the signature shares and convert to BIP-0062 format (negating if the
         // sum is > group order /2)
-        // TODO: replace by Lagrange interpolation
         let mut sum = shares.into_iter().fold(Scalar::ZERO, |a, b| a + b);
+
         sum.conditional_assign(&sum.negate(), sum.is_high());
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;

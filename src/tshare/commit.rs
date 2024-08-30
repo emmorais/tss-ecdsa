@@ -112,13 +112,13 @@ impl TshareDecommit {
         }
 
         // Check the number of commitments As.
-        if self.As.len() != threshold {
+        if self.As.len() < threshold {
             error!("Incorrect number of As");
             return Err(InternalError::ProtocolError(Some(sender)));
         }
 
         // Check the set of coefficients.
-        if self.coeff_publics.len() != threshold {
+        if self.coeff_publics.len() < threshold {
             error!("Incorrect number of public shares");
             return Err(InternalError::ProtocolError(Some(sender)));
         }

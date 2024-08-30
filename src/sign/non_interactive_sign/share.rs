@@ -16,7 +16,7 @@ use crate::{
 /// A single participant's share of the signature.
 #[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignatureShare(Scalar);
+pub struct SignatureShare(pub Scalar);
 
 impl SignatureShare {
     pub(super) fn new(share: Scalar) -> Self {
@@ -47,5 +47,19 @@ impl std::ops::Add<SignatureShare> for Scalar {
     type Output = Self;
     fn add(self, rhs: SignatureShare) -> Self::Output {
         self + rhs.0
+    }
+}
+
+impl std::ops::Mul<SignatureShare> for SignatureShare {
+    type Output = Scalar;
+    fn mul(self, rhs: SignatureShare) -> Self::Output {
+        self.0 * rhs.0
+    }
+}
+
+impl std::ops::Mul<SignatureShare> for Scalar {
+    type Output = Scalar;
+    fn mul(self, rhs: SignatureShare) -> Self::Output {
+        self * rhs.0
     }
 }
