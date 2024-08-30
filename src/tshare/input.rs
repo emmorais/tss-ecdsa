@@ -106,10 +106,7 @@ impl Input {
 mod test {
     use super::{super::TshareParticipant, Input};
     use crate::{
-        auxinfo,
-        errors::{CallerError, InternalError, Result},
-        utils::testing::init_testing,
-        Identifier, ParticipantConfig, ProtocolParticipant,
+        auxinfo, errors::{CallerError, InternalError, Result}, utils::testing::init_testing, Identifier, ParticipantConfig, ParticipantIdentifier, ProtocolParticipant
     };
 
     #[test]
@@ -193,6 +190,44 @@ mod test {
         assert_eq!(
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn find_existing_auxinfo_public() -> Result<()> {
+        let rng = &mut init_testing();
+        let SIZE = 5;
+
+        // Create valid input set with random PIDs
+        let config = ParticipantConfig::random(SIZE, rng);
+        let auxinfo_output = auxinfo::Output::simulate(&config.all_participants(), rng);
+        let input = Input::new(auxinfo_output, None, 2)?;
+
+        let pid = config.all_participants()[0];
+        let auxinfo_public = input.find_auxinfo_public(pid)?;
+        assert_eq!(auxinfo_public.participant(), pid);
+
+        Ok(())
+    }
+
+    #[test]
+    fn find_non_existing_auxinfo_public_should_fail() -> Result<()> {
+        let rng = &mut init_testing();
+        let SIZE = 5;
+
+        // Create valid input set with random PIDs
+        let config = ParticipantConfig::random(SIZE, rng);
+        let auxinfo_output = auxinfo::Output::simulate(&config.all_participants(), rng);
+        let input = Input::new(auxinfo_output, None, 2)?;
+
+        let pid = ParticipantIdentifier::random(rng);
+        let result = input.find_auxinfo_public(pid);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::InternalInvariantFailed
         );
 
         Ok(())
