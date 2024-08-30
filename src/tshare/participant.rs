@@ -812,6 +812,7 @@ impl TshareParticipant {
                 return Err(InternalError::InternalInvariantFailed);
             }
 
+            let all_public_coeffs_clone = all_public_coeffs.clone();
             // Return the output and stop.
             let all_public_coeffs = all_public_coeffs
                 .iter()
@@ -822,13 +823,13 @@ impl TshareParticipant {
             let output = Output::from_parts(all_public_coeffs, my_private_share.x.clone())?;
 
             // Check that the new shared value is consistent with the old one (if given).
-            /*if let Some(share) = self.input.share() {
-                let old_public = // TODO: get previous public shared value.
-                if old_public != all_public_coeffs[0] {
+            if let Some(share) = self.input.share() {
+                let old_public = Self::aggregate_constant_terms(&coeffs_from_all);
+                if old_public != all_public_coeffs_clone[0] {
                     error!("The new public key share is inconsistent with the old one.");
                     return Err(InternalError::ProtocolError(None));
-                }
-            }*/
+                };
+            }
 
             self.status = Status::TerminatedSuccessfully;
             Ok(ProcessOutcome::Terminated(output))
@@ -855,6 +856,14 @@ impl TshareParticipant {
                 CoeffPublic::new(sum)
             })
             .collect()
+    }
+
+    fn aggregate_constant_terms(coeffs_from_all: &[Vec<CoeffPublic>]) -> CoeffPublic {
+        // for each Vec<CoeffPublic> in coeffs_from_all, we take the first CoeffPublic
+        let constant_terms: Vec<CoeffPublic> = coeffs_from_all.iter().map(|coeffs| coeffs[0].clone()).collect::<Vec<_>>();
+
+        // now that we have the constant terms in a vector, we can sum them
+        constant_terms.iter().fold(CoeffPublic::new(CurvePoint::IDENTITY), |sum, coeff| sum + coeff)
     }
 }
 
