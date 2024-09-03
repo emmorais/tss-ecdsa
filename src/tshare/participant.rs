@@ -650,6 +650,8 @@ impl TshareParticipant {
         coeff_privates[0].x.clone()
     }
 
+    /// Feldman VSS evaluation of the public share.
+    /// This algorithm is slow. Consider using multiexponentiation.
     fn eval_public_share(
         coeff_publics: &[CoeffPublic],
         recipient_id: ParticipantIdentifier,
@@ -1085,7 +1087,8 @@ mod tests {
             .map(|x| Scalar::from(x.id.as_u128() + 1u128))
             .collect::<Vec<Scalar>>();
 
-        // Test lagrange_coefficient_at_zero return the correct coefficients in order to recompute the sum of initial additive shares
+        // Test lagrange_coefficient_at_zero return the correct coefficients in order to
+        // recompute the sum of initial additive shares
         let mut sum_lagrange = Scalar::ZERO;
         let mut sum_input_shares = Scalar::ZERO;
         for (input, (output, pid)) in inputs

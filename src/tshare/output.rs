@@ -59,8 +59,10 @@ impl Output {
     /// The provided components must satisfy the following properties:
     /// - There is a valid key pair -- that is, the public key corresponding to
     ///   the private key share must be contained in the list of public shares.
-    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant term form a key pair with this constant,
-    /// but this constant is not what is stored in the private key share, which is an evaluation of the polynomial
+    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant
+    /// term form a key pair with this constant, but this constant is not
+    /// what is stored in the private key share, which is an evaluation of the
+    /// polynomial
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
         public_coeffs: Vec<KeySharePublic>,

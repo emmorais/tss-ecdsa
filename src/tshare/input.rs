@@ -152,8 +152,7 @@ mod test {
         let independent_config = ParticipantConfig::random(SIZE, rng);
 
         // Replace auxinfo_output with a new one that doesn't match the config
-        let auxinfo_output =
-            auxinfo::Output::simulate(&independent_config.all_participants(), rng);
+        let auxinfo_output = auxinfo::Output::simulate(&independent_config.all_participants(), rng);
         let input_with_invalid_auxinfo = Input::new(auxinfo_output, None, 2)?;
         let result = TshareParticipant::new(
             Identifier::random(rng),

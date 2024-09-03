@@ -111,7 +111,8 @@ impl SigningMaterial {
                 digest,
                 public_keys,
             } => {
-                // TODO: threhsold is not implemented yet for the interactive signing, must use the same as the public keys size
+                // TODO: threhsold is not implemented yet for the interactive signing, must use
+                // the same as the public keys size
                 let threshold = public_keys.len();
                 let signing_input =
                     sign::Input::new_from_digest(*digest, record, public_keys, threshold);

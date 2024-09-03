@@ -406,7 +406,8 @@ impl SignParticipant {
     fn compute_output(&mut self) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         // Retrieve everyone's share and the x-projection we saved in round one
         // (This will fail if we're missing any shares)
-        // TODO: if less than t participants are present, then the protocol should fail (in a different place? first round?)
+        // TODO: if less than t participants are present, then the protocol should fail
+        // (in a different place? first round?)
 
         //let mut sum = self.aggregate_lagrange_at_zero()?;
         let shares = self
