@@ -590,7 +590,7 @@ impl TshareParticipant {
             .iter()
             .map(|other_participant_id| {
                 let private_share =
-                    Self::eval_private_share(&private_coeffs, *other_participant_id);
+                    Self::eval_private_share(private_coeffs, *other_participant_id);
 
                 let auxinfo = self.input.find_auxinfo_public(*other_participant_id)?;
                 EvalEncrypted::encrypt(&private_share, auxinfo.pk(), rng)
@@ -628,7 +628,8 @@ impl TshareParticipant {
         BigNumber::from(pid.as_u128()) + BigNumber::one()
     }
 
-    fn eval_private_share(
+    /// Evaluate the private share
+    pub fn eval_private_share(
         coeff_privates: &[CoeffPrivate],
         recipient_id: ParticipantIdentifier,
     ) -> CoeffPrivate {
@@ -646,13 +647,14 @@ impl TshareParticipant {
         CoeffPrivate { x: sum }
     }
 
+    /// Evaluate the private share at the point 0.
     fn eval_private_share_at_zero(coeff_privates: &[CoeffPrivate]) -> BigNumber {
         coeff_privates[0].x.clone()
     }
 
     /// Feldman VSS evaluation of the public share.
     /// This algorithm is slow. Consider using multiexponentiation.
-    fn eval_public_share(
+    pub(crate) fn eval_public_share(
         coeff_publics: &[CoeffPublic],
         recipient_id: ParticipantIdentifier,
     ) -> Result<CurvePoint> {
@@ -795,7 +797,7 @@ impl TshareParticipant {
                         .remove::<storage::ValidPublicCoeffs>(*pid)
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let all_public_coeffs = Self::aggregate_public_coeffs(&&coeffs_from_all);
+            let all_public_coeffs = Self::aggregate_public_coeffs(&coeffs_from_all);
 
             // Compute the one's own private evaluation.
             let from_all_to_me_private = self
@@ -805,13 +807,14 @@ impl TshareParticipant {
                 .collect::<Result<Vec<_>>>()?;
             let my_private_share = Self::aggregate_private_shares(&from_all_to_me_private);
 
+            // Feldman validation
             // Double-check that the aggregated private share matches the aggregated public
-            // coeffs.
+            // coeffs.            
             let expected_public = Self::eval_public_share(&all_public_coeffs, self.id())?;
             let implied_public = my_private_share.public_point()?;
             if implied_public != expected_public {
-                error!("the aggregated private share does not match the public coeffs");
-                return Err(InternalError::InternalInvariantFailed);
+                error!("The aggregated private share does not match the public coeffs (Feldman)");
+                return Err(InternalError::ProtocolError(None));
             }
 
             let all_public_coeffs_clone = all_public_coeffs.clone();
@@ -824,14 +827,14 @@ impl TshareParticipant {
 
             let output = Output::from_parts(all_public_coeffs, my_private_share.x.clone())?;
 
-            // Check that the new shared value is consistent with the old one (if given).
+            // Check that doing the aggregation of constant terms in a different order results in the same result 
             let old_public = Self::aggregate_constant_terms(&coeffs_from_all);
             if old_public != all_public_coeffs_clone[0] {
-                error!("The new public key share is inconsistent with the old one.");
+                error!("The new public key share has inconsistent constant term.");
                 return Err(InternalError::ProtocolError(None));
             };
 
-            // Check if the share is consistent
+            // Check if the share is consistent, it must have a public key that corresponds right public coefficient
             if let Some(share) = self.input.share() {
                 let old_public_key = share.public_point()?;
                 if old_public_key != *coeffs_from_all[0][0].as_ref() {
@@ -1096,14 +1099,12 @@ mod tests {
             .zip(outputs.iter().zip(all_participants.clone()))
         {
             if let Some(share) = input.share() {
-                let pid_scalar = Scalar::from(pid);
                 let input_share_scalar = bn_to_scalar(&share.x)?;
                 let output_share_scalar = bn_to_scalar(output.private_key_share())?;
-                let lagrange_coeff = lagrange_coefficient_at_zero(&pid_scalar, &all_participants);
+                let lagrange_coeff = lagrange_coefficient_at_zero(&pid, &all_participants);
                 sum_lagrange += output_share_scalar * lagrange_coeff;
                 sum_input_shares += input_share_scalar;
             }
-            return Ok(());
         }
         assert_eq!(sum_lagrange, sum_input_shares);
 

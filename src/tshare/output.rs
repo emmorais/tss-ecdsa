@@ -9,9 +9,7 @@ use libpaillier::unknown_order::BigNumber;
 use std::collections::HashSet;
 
 use crate::{
-    errors::{CallerError, InternalError, Result},
-    keygen::KeySharePublic,
-    utils::CurvePoint,
+    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, utils::CurvePoint
 };
 
 use k256::ecdsa::VerifyingKey;
@@ -57,12 +55,8 @@ impl Output {
     /// should not try to form public and private key shares independently.
     ///
     /// The provided components must satisfy the following properties:
-    /// - There is a valid key pair -- that is, the public key corresponding to
-    ///   the private key share must be contained in the list of public shares.
-    /// TODO(DISCUSSION): indeed the PublicCoeff corresponding to the constant
-    /// term form a key pair with this constant, but this constant is not
-    /// what is stored in the private key share, which is an evaluation of the
-    /// polynomial
+    /// - Validity of private key share can be checked using Feldman's VSS,
+    /// but since the id is not known, it must be tested by the caller
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
         public_coeffs: Vec<KeySharePublic>,
@@ -72,8 +66,6 @@ impl Output {
             .iter()
             .map(KeySharePublic::participant)
             .collect::<HashSet<_>>();
-        dbg!(pids.len());
-        dbg!(public_coeffs.len());
         if pids.len() != public_coeffs.len() {
             error!("Tried to create a keygen output using a set of public material from non-unique participants");
             Err(CallerError::BadInput)?
@@ -103,8 +95,7 @@ impl Output {
 mod tests {
     use super::*;
     use crate::{
-        utils::{k256_order, testing::init_testing},
-        ParticipantIdentifier,
+        tshare::{CoeffPrivate, CoeffPublic, TshareParticipant}, utils::{k256_order, testing::init_testing}, ParticipantIdentifier
     };
 
     impl Output {
@@ -114,7 +105,7 @@ mod tests {
         /// This should __never__ be called outside of tests! The given `pids`
         /// must not contain duplicates. Self is the last participant in `pids`.
         pub(crate) fn simulate(pids: &[ParticipantIdentifier]) -> Self {
-            let (mut private_key_shares, public_key_shares): (Vec<_>, Vec<_>) = pids
+            let (private_key_shares, public_key_shares): (Vec<_>, Vec<_>) = pids
                 .iter()
                 .map(|&pid| {
                     // TODO #340: Replace with KeyShare methods once they exist.
@@ -126,7 +117,18 @@ mod tests {
                 })
                 .unzip();
 
-            Self::from_parts(public_key_shares, private_key_shares.pop().unwrap()).unwrap()
+            // simulate a random evaluation
+            //let new_secret = BigNumber::random(&k256_order());
+            let converted_publics = public_key_shares.iter().map(|x| CoeffPublic::new(*x.as_ref())).collect::<Vec<_>>();
+            let converted_privates = private_key_shares.iter().map(|x| CoeffPrivate { x: x.clone() }).collect::<Vec<_>>();
+            let eval_public_at_first_pid = TshareParticipant::eval_public_share(converted_publics.as_slice(), pids[0]).unwrap();
+            let eval_private_at_first_pid = TshareParticipant::eval_private_share(&converted_privates.as_slice(), pids[0]);
+            //Self::from_parts(public_key_shares, new_secret).unwrap()
+            let output = Self::from_parts(public_key_shares, eval_private_at_first_pid.x.clone()).unwrap();
+
+            let implied_public = eval_private_at_first_pid.public_point().unwrap();
+            assert!(implied_public == eval_public_at_first_pid);
+            output
         }
     }
 
@@ -141,25 +143,6 @@ mod tests {
         let (public, private) = output.into_parts();
         assert!(Output::from_parts(public, private).is_ok());
     }
-
-    //#[test]
-    /* TODO: the private key is not part of the output, it is a PrivateCoeff
-    fn private_field_must_correspond_to_a_public() {
-        let rng = &mut init_testing();
-        let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
-            .take(5)
-            .collect::<Vec<_>>();
-
-        // Use the simulate function to get a set of valid public components
-        let output = Output::simulate(&pids);
-
-        // Create a random private share. It's legally possible for this to match one of
-        // the public keys but it's so unlikely that we won't check it.
-        let bad_private_key_share = BigNumber::random(&k256_order());
-
-        // TODO: move the check from TshareParticipant::maybe_finish here.
-        assert!(Output::from_parts(output.public_key_shares, bad_private_key_share).is_err())
-    }*/
 
     #[test]
     fn public_shares_must_not_have_duplicate_pids() {

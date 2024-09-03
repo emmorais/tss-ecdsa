@@ -9,7 +9,7 @@ fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
     coefficients
 }
 
-pub fn evaluate_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
+pub fn evaluate_polynomial(coefficients: &[Scalar], x: &Scalar) -> Scalar {
     coefficients
         .iter()
         .rev()
@@ -23,7 +23,7 @@ pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar
             let numerator = Scalar::ZERO - point;
             let denominator = my_point - point;
             let inv = denominator.invert().unwrap();
-            result *= numerator * &inv;
+            result *= numerator * inv;
         }
     }
     result
@@ -41,7 +41,7 @@ pub fn lagrange_coefficient(my_point: &Scalar, other_points: &Vec<Scalar>) -> Sc
     result
 }
 
-fn evaluate_at_points(coefficients: &Vec<Scalar>, points: &Vec<Scalar>) -> Vec<Scalar> {
+fn evaluate_at_points(coefficients: &[Scalar], points: &[Scalar]) -> Vec<Scalar> {
     points
         .iter()
         .map(|x| evaluate_polynomial(coefficients, x))
@@ -71,11 +71,9 @@ mod tests {
     fn test_lagrange_coefficients() {
         let points: Vec<Scalar> = (1..=3).map(|i: u32| Scalar::from(i)).collect();
         // Next we represent the polynomial x^2 + x
-        let evaluated_values = vec![
-            points[0] * Scalar::from(2u32),
+        let evaluated_values = [points[0] * Scalar::from(2u32),
             points[1] * Scalar::from(3u32),
-            points[2] * Scalar::from(4u32),
-        ];
+            points[2] * Scalar::from(4u32)];
 
         let reconstructed_zero = evaluated_values
             .iter()

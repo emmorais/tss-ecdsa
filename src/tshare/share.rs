@@ -93,6 +93,7 @@ impl CoeffPrivate {
     // TODO: Introduce a dedicated Output for tshare,
     // implement tshare::Output::public_key(),
     // and remove this conversion.
+    /// Convert a CoeffPrivate to a KeySharePrivate.
     pub fn to_keyshare(&self) -> KeySharePrivate {
         KeySharePrivate::from_bigint(&self.x)
     }
@@ -138,6 +139,7 @@ impl CoeffPublic {
     }
 
     // TODO: Introduce a dedicated Output for tshare, and remove this conversion.
+    /// Convert a CoeffPublic to a KeySharePublic.
     pub fn to_keyshare(&self, i: usize) -> KeySharePublic {
         KeySharePublic::new(ParticipantIdentifier::from_u128(i as u128), self.X)
     }
