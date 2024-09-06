@@ -96,7 +96,7 @@ impl Output {
     /// Decompose the `Output` into its constituent parts.
     ///
     /// # 🔒 Storage requirements
-    /// The [`KeySharePrivate`] must be stored securely by the calling
+    /// The private_key_share must be stored securely by the calling
     /// application, and a best effort should be made to drop it from memory
     /// after it's securely stored.
     ///
