@@ -71,9 +71,11 @@ mod tests {
     fn test_lagrange_coefficients() {
         let points: Vec<Scalar> = (1..=3).map(|i: u32| Scalar::from(i)).collect();
         // Next we represent the polynomial x^2 + x
-        let evaluated_values = [points[0] * Scalar::from(2u32),
+        let evaluated_values = [
+            points[0] * Scalar::from(2u32),
             points[1] * Scalar::from(3u32),
-            points[2] * Scalar::from(4u32)];
+            points[2] * Scalar::from(4u32),
+        ];
 
         let reconstructed_zero = evaluated_values
             .iter()

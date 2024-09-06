@@ -9,16 +9,23 @@ use libpaillier::unknown_order::BigNumber;
 use std::collections::HashSet;
 
 use crate::{
-    errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, utils::CurvePoint
+    errors::{CallerError, InternalError, Result},
+    keygen::KeySharePublic,
+    utils::CurvePoint,
 };
 
 use k256::ecdsa::VerifyingKey;
 use tracing::error;
 
+use super::CoeffPublic;
+
 /// Output type from key generation, including all parties' public key shares,
 /// this party's private key share, and a bit of global randomness.
 #[derive(Debug, Clone)]
 pub struct Output {
+    // Public coefficients for the polynomial
+    public_coeffs: Vec<CoeffPublic>,
+    // Public keys for each participant
     public_key_shares: Vec<KeySharePublic>,
     //private_key_share: KeySharePrivate,
     private_key_share: BigNumber,
@@ -44,6 +51,11 @@ impl Output {
         &self.public_key_shares
     }
 
+    /// Get the public coefficients (coefficients in the exponent).
+    pub fn public_coeffs(&self) -> &[CoeffPublic] {
+        &self.public_coeffs
+    }
+
     pub(crate) fn private_key_share(&self) -> &BigNumber {
         &self.private_key_share
     }
@@ -59,20 +71,23 @@ impl Output {
     /// but since the id is not known, it must be tested by the caller
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
-        public_coeffs: Vec<KeySharePublic>,
+        public_coeffs: Vec<CoeffPublic>,
+        public_keys: Vec<KeySharePublic>,
         private_key_share: BigNumber,
     ) -> Result<Self> {
-        let pids = public_coeffs
+        let pids = public_keys
             .iter()
             .map(KeySharePublic::participant)
             .collect::<HashSet<_>>();
-        if pids.len() != public_coeffs.len() {
+        if pids.len() != public_coeffs.len() || pids.len() != public_keys.len() {
             error!("Tried to create a keygen output using a set of public material from non-unique participants");
             Err(CallerError::BadInput)?
         }
 
+        // TODO: Validate the private key share using Feldman's VSS
         Ok(Self {
-            public_key_shares: public_coeffs,
+            public_coeffs,
+            public_key_shares: public_keys,
             private_key_share,
         })
     }
@@ -86,8 +101,8 @@ impl Output {
     ///
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
-    pub fn into_parts(self) -> (Vec<KeySharePublic>, BigNumber) {
-        (self.public_key_shares, self.private_key_share)
+    pub fn into_parts(self) -> (Vec<CoeffPublic>, Vec<KeySharePublic>, BigNumber) {
+        (self.public_coeffs, self.public_key_shares, self.private_key_share)
     }
 }
 
@@ -95,8 +110,11 @@ impl Output {
 mod tests {
     use super::*;
     use crate::{
-        tshare::{CoeffPrivate, CoeffPublic, TshareParticipant}, utils::{k256_order, testing::init_testing}, ParticipantIdentifier
+        tshare::{CoeffPrivate, CoeffPublic, TshareParticipant},
+        utils::{k256_order, testing::init_testing},
+        ParticipantIdentifier,
     };
+    use itertools::Itertools;
 
     impl Output {
         /// Simulate the valid output of a keygen run with the given
@@ -119,12 +137,22 @@ mod tests {
 
             // simulate a random evaluation
             //let new_secret = BigNumber::random(&k256_order());
-            let converted_publics = public_key_shares.iter().map(|x| CoeffPublic::new(*x.as_ref())).collect::<Vec<_>>();
-            let converted_privates = private_key_shares.iter().map(|x| CoeffPrivate { x: x.clone() }).collect::<Vec<_>>();
-            let eval_public_at_first_pid = TshareParticipant::eval_public_share(converted_publics.as_slice(), pids[0]).unwrap();
-            let eval_private_at_first_pid = TshareParticipant::eval_private_share(&converted_privates.as_slice(), pids[0]);
+            let converted_publics = public_key_shares
+                .iter()
+                .map(|x| CoeffPublic::new(*x.as_ref()))
+                .collect::<Vec<_>>();
+            let converted_privates = private_key_shares
+                .iter()
+                .map(|x| CoeffPrivate { x: x.clone() })
+                .collect::<Vec<_>>();
+            let eval_public_at_first_pid =
+                TshareParticipant::eval_public_share(converted_publics.as_slice(), pids[0])
+                    .unwrap();
+            let eval_private_at_first_pid =
+                TshareParticipant::eval_private_share(&converted_privates.as_slice(), pids[0]);
             //Self::from_parts(public_key_shares, new_secret).unwrap()
-            let output = Self::from_parts(public_key_shares, eval_private_at_first_pid.x.clone()).unwrap();
+            let output =
+                Self::from_parts(converted_publics, public_key_shares, eval_private_at_first_pid.x.clone()).unwrap();
 
             let implied_public = eval_private_at_first_pid.public_point().unwrap();
             assert!(implied_public == eval_public_at_first_pid);
@@ -140,8 +168,8 @@ mod tests {
             .collect::<Vec<_>>();
         let output = Output::simulate(&pids);
 
-        let (public, private) = output.into_parts();
-        assert!(Output::from_parts(public, private).is_ok());
+        let (public_coeffs, public_keys, private_key) = output.into_parts();
+        assert!(Output::from_parts(public_coeffs, public_keys, private_key).is_ok());
     }
 
     #[test]
@@ -155,7 +183,7 @@ mod tests {
         pids.push(pids[4]);
 
         // Form output with the duplicated PID
-        let (mut private_key_shares, public_key_shares): (Vec<_>, Vec<_>) = pids
+        let (mut private_key_shares, public_key_shares, public_coeffs): (Vec<_>, Vec<_>, Vec<_>) = pids
             .iter()
             .map(|&pid| {
                 // TODO #340: Replace with KeyShare methods once they exist.
@@ -163,10 +191,10 @@ mod tests {
                 let public = CurvePoint::GENERATOR
                     .multiply_by_bignum(&secret)
                     .expect("can't multiply by generator");
-                (secret, KeySharePublic::new(pid, public))
+                (secret, KeySharePublic::new(pid, public), CoeffPublic::new(public))
             })
-            .unzip();
+            .multiunzip();
 
-        assert!(Output::from_parts(public_key_shares, private_key_shares.pop().unwrap()).is_err());
+        assert!(Output::from_parts(public_coeffs, public_key_shares, private_key_shares.pop().unwrap()).is_err());
     }
 }

@@ -95,8 +95,10 @@ impl Output {
             error!("Tried to create a keygen output using a set of public material from non-unique participants");
             Err(CallerError::BadInput)?
         }
+        dbg!("primeiro erro");
 
         let expected_public_share = private_key_share.public_share()?;
+        // TODO: uncomment this when output from tshare is fixed
         if !public_key_shares
             .iter()
             .any(|share| share.as_ref() == &expected_public_share)
@@ -104,6 +106,7 @@ impl Output {
             error!("Tried to create a keygen output using a private share with no corresponding public share");
             Err(CallerError::BadInput)?
         }
+        dbg!("segundo erro");
 
         Ok(Self {
             public_key_shares,

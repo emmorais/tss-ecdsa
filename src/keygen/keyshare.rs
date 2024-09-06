@@ -179,6 +179,7 @@ impl KeySharePublic {
 
 impl AsRef<CurvePoint> for KeySharePublic {
     /// Get the public curvepoint which is the public key share.
+    /// TODO: change the name of this method to `as_curvepoint` or similar.
     fn as_ref(&self) -> &CurvePoint {
         &self.X
     }

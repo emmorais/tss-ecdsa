@@ -79,8 +79,7 @@ pub struct Input {
     digest: Keccak256,
     presign_record: PresignRecord,
     public_key_shares: Vec<KeySharePublic>,
-    //TODO: add threshold field
-    //threshold: usize,
+    threshold: usize,
 }
 
 impl Input {
@@ -92,13 +91,13 @@ impl Input {
         message: &[u8],
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-        _threshold: usize,
+        threshold: usize,
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
             presign_record: record,
             public_key_shares,
-            //threshold,
+            threshold,
         }
     }
 
@@ -110,13 +109,13 @@ impl Input {
         digest: Keccak256,
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-        _threshold: usize,
+        threshold: usize,
     ) -> Self {
         Self {
             digest,
             presign_record: record,
             public_key_shares,
-            //threshold,
+            threshold,
         }
     }
 
@@ -225,6 +224,9 @@ impl ProtocolParticipant for SignParticipant {
             .chain(other_participant_ids)
             .collect::<HashSet<_>>();
         if public_key_pids != pids || config.count() != input.public_key_shares.len() {
+            Err(CallerError::BadInput)?
+        }
+        if config.count() < input.threshold {
             Err(CallerError::BadInput)?
         }
 
@@ -409,14 +411,13 @@ impl SignParticipant {
         // TODO: if less than t participants are present, then the protocol should fail
         // (in a different place? first round?)
 
-        //let mut sum = self.aggregate_lagrange_at_zero()?;
+        // Retrieve everyone's id and share
         let shares = self
             .all_participants()
             .into_iter()
             .map(|pid| self.storage.remove::<storage::Share>(pid))
             .collect::<Result<Vec<_>>>()?;
 
-        // Retrieve everyone's id and share
 
         let x_projection = self.storage.remove::<storage::XProj>(self.id())?;
 
@@ -428,6 +429,7 @@ impl SignParticipant {
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;
 
+        dbg!("BEFORE VERIFICATION");
         // Verify signature
         self.input
             .public_key()?
@@ -436,6 +438,7 @@ impl SignParticipant {
                 error!("Failed to verify signature {:?}", e);
                 InternalError::ProtocolError(None)
             })?;
+        dbg!("AFTER VERIFICATION"); // FIXME: it doesn't get here
 
         // Output full signature
         self.status = Status::TerminatedSuccessfully;
