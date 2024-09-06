@@ -102,7 +102,11 @@ impl Output {
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
     pub fn into_parts(self) -> (Vec<CoeffPublic>, Vec<KeySharePublic>, BigNumber) {
-        (self.public_coeffs, self.public_key_shares, self.private_key_share)
+        (
+            self.public_coeffs,
+            self.public_key_shares,
+            self.private_key_share,
+        )
     }
 }
 
@@ -149,10 +153,14 @@ mod tests {
                 TshareParticipant::eval_public_share(converted_publics.as_slice(), pids[0])
                     .unwrap();
             let eval_private_at_first_pid =
-                TshareParticipant::eval_private_share(&converted_privates.as_slice(), pids[0]);
+                TshareParticipant::eval_private_share(converted_privates.as_slice(), pids[0]);
             //Self::from_parts(public_key_shares, new_secret).unwrap()
-            let output =
-                Self::from_parts(converted_publics, public_key_shares, eval_private_at_first_pid.x.clone()).unwrap();
+            let output = Self::from_parts(
+                converted_publics,
+                public_key_shares,
+                eval_private_at_first_pid.x.clone(),
+            )
+            .unwrap();
 
             let implied_public = eval_private_at_first_pid.public_point().unwrap();
             assert!(implied_public == eval_public_at_first_pid);
@@ -183,18 +191,27 @@ mod tests {
         pids.push(pids[4]);
 
         // Form output with the duplicated PID
-        let (mut private_key_shares, public_key_shares, public_coeffs): (Vec<_>, Vec<_>, Vec<_>) = pids
-            .iter()
-            .map(|&pid| {
-                // TODO #340: Replace with KeyShare methods once they exist.
-                let secret = BigNumber::random(&k256_order());
-                let public = CurvePoint::GENERATOR
-                    .multiply_by_bignum(&secret)
-                    .expect("can't multiply by generator");
-                (secret, KeySharePublic::new(pid, public), CoeffPublic::new(public))
-            })
-            .multiunzip();
+        let (mut private_key_shares, public_key_shares, public_coeffs): (Vec<_>, Vec<_>, Vec<_>) =
+            pids.iter()
+                .map(|&pid| {
+                    // TODO #340: Replace with KeyShare methods once they exist.
+                    let secret = BigNumber::random(&k256_order());
+                    let public = CurvePoint::GENERATOR
+                        .multiply_by_bignum(&secret)
+                        .expect("can't multiply by generator");
+                    (
+                        secret,
+                        KeySharePublic::new(pid, public),
+                        CoeffPublic::new(public),
+                    )
+                })
+                .multiunzip();
 
-        assert!(Output::from_parts(public_coeffs, public_key_shares, private_key_shares.pop().unwrap()).is_err());
+        assert!(Output::from_parts(
+            public_coeffs,
+            public_key_shares,
+            private_key_shares.pop().unwrap()
+        )
+        .is_err());
     }
 }

@@ -13,9 +13,19 @@ use super::{
     share::{CoeffPrivate, CoeffPublic, EvalEncrypted},
 };
 use crate::{
-    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag}, errors::{CallerError, InternalError, Result}, keygen::KeySharePublic, local_storage::LocalStorage, messages::{Message, MessageType, TshareMessageType}, participant::{
+    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
+    errors::{CallerError, InternalError, Result},
+    keygen::KeySharePublic,
+    local_storage::LocalStorage,
+    messages::{Message, MessageType, TshareMessageType},
+    participant::{
         Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
-    }, protocol::{ParticipantIdentifier, ProtocolType, SharedContext}, run_only_once, utils::{k256_order, CurvePoint}, zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret}, Identifier, ParticipantConfig
+    },
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
+    run_only_once,
+    utils::{k256_order, CurvePoint},
+    zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
+    Identifier, ParticipantConfig,
 };
 
 use libpaillier::unknown_order::BigNumber;
@@ -651,7 +661,7 @@ impl TshareParticipant {
         let x = Self::participant_coordinate(recipient_id);
         let mut sum = CurvePoint::IDENTITY;
         for coeff in coeff_publics.iter().rev() {
-            sum = sum.multiply_by_bignum(&x)?; 
+            sum = sum.multiply_by_bignum(&x)?;
             sum = sum + *coeff.as_ref();
         }
         Ok(sum)
@@ -808,20 +818,24 @@ impl TshareParticipant {
             }
             // Evaluate the public share of all other ids and store in a vector
             let mut all_public_keys = vec![];
-            all_public_keys.push(KeySharePublic::new(self.id(), expected_public));
             for pid in self.other_participant_ids.iter() {
                 let public_share = Self::eval_public_share(&all_public_coeffs, *pid)?;
                 let public_share = KeySharePublic::new(*pid, public_share);
                 all_public_keys.push(public_share);
             }
+            all_public_keys.push(KeySharePublic::new(self.id(), expected_public));
             dbg!(all_public_keys.clone());
-
 
             let all_public_coeffs_clone = all_public_coeffs.clone();
             // Return the output and stop.
 
-            // Since we need the public coeffs laters, we include it together with public shares 
-            let output = Output::from_parts(all_public_coeffs_clone.clone(), all_public_keys, my_private_share.x.clone())?;
+            // Since we need the public coeffs laters, we include it together with public
+            // shares
+            let output = Output::from_parts(
+                all_public_coeffs_clone.clone(),
+                all_public_keys,
+                my_private_share.x.clone(),
+            )?;
 
             // Check that doing the aggregation of constant terms in a different order
             // results in the same result
@@ -862,274 +876,279 @@ impl TshareParticipant {
                 let sum = coeffs_from_all
                     .iter()
                     .fold(CurvePoint::IDENTITY, |sum, coeffs| {
-                            sum + *coeffs[i].as_ref()
-                        });
-                    CoeffPublic::new(sum)
-                })
-                .collect()
-        }
-
-        fn aggregate_constant_terms(coeffs_from_all: &[Vec<CoeffPublic>]) -> CoeffPublic {
-            // for each Vec<CoeffPublic> in coeffs_from_all, we take the first CoeffPublic
-            let constant_terms: Vec<CoeffPublic> = coeffs_from_all
-                .iter()
-                .map(|coeffs| coeffs[0].clone())
-                .collect::<Vec<_>>();
-
-            // now that we have the constant terms in a vector, we can sum them
-            constant_terms
-                .iter()
-                .fold(CoeffPublic::new(CurvePoint::IDENTITY), |sum, coeff| {
-                    sum + coeff
-                })
-        }
+                        sum + *coeffs[i].as_ref()
+                    });
+                CoeffPublic::new(sum)
+            })
+            .collect()
     }
 
-    /// Generate a [`Transcript`] for [`PiSchProof`].
-    fn schnorr_proof_transcript(
-        sid: Identifier,
-        global_rid: &[u8; 32],
-        sender_id: ParticipantIdentifier,
-    ) -> Result<Transcript> {
-        let mut transcript = Transcript::new(b"tshare schnorr");
-        transcript.append_message(b"sid", &serialize!(&sid)?);
-        transcript.append_message(b"rid", &serialize!(global_rid)?);
-        transcript.append_message(b"sender_id", &serialize!(&sender_id)?);
-        Ok(transcript)
+    fn aggregate_constant_terms(coeffs_from_all: &[Vec<CoeffPublic>]) -> CoeffPublic {
+        // for each Vec<CoeffPublic> in coeffs_from_all, we take the first CoeffPublic
+        let constant_terms: Vec<CoeffPublic> = coeffs_from_all
+            .iter()
+            .map(|coeffs| coeffs[0].clone())
+            .collect::<Vec<_>>();
+
+        // now that we have the constant terms in a vector, we can sum them
+        constant_terms
+            .iter()
+            .fold(CoeffPublic::new(CurvePoint::IDENTITY), |sum, coeff| {
+                sum + coeff
+            })
     }
+}
 
-    #[cfg(test)]
-    mod tests {
-        use super::{super::input::Input, *};
-        use crate::{
-            auxinfo,
-            threshold::lagrange_coefficient_at_zero,
-            utils::{bn_to_scalar, testing::init_testing_with_seed},
-            Identifier, ParticipantConfig,
-        };
-        use k256::Scalar;
-        use rand::{CryptoRng, Rng, RngCore};
-        use std::{collections::HashMap, iter::zip};
-        use tracing::debug;
+/// Generate a [`Transcript`] for [`PiSchProof`].
+fn schnorr_proof_transcript(
+    sid: Identifier,
+    global_rid: &[u8; 32],
+    sender_id: ParticipantIdentifier,
+) -> Result<Transcript> {
+    let mut transcript = Transcript::new(b"tshare schnorr");
+    transcript.append_message(b"sid", &serialize!(&sid)?);
+    transcript.append_message(b"rid", &serialize!(global_rid)?);
+    transcript.append_message(b"sender_id", &serialize!(&sender_id)?);
+    Ok(transcript)
+}
 
-        impl TshareParticipant {
-            pub fn new_quorum<R: RngCore + CryptoRng>(
-                sid: Identifier,
-                quorum_size: usize,
-                share: Option<CoeffPrivate>,
-                rng: &mut R,
-            ) -> Result<Vec<Self>> {
-                // Prepare prereqs for making TshareParticipant's. Assume all the
-                // simulations are stable (e.g. keep config order)
-                let configs = ParticipantConfig::random_quorum(quorum_size, rng)?;
-                let auxinfo_outputs = auxinfo::Output::simulate_set(&configs, rng);
+#[cfg(test)]
+mod tests {
+    use super::{super::input::Input, *};
+    use crate::{
+        auxinfo,
+        threshold::lagrange_coefficient_at_zero,
+        utils::{bn_to_scalar, testing::init_testing_with_seed},
+        Identifier, ParticipantConfig,
+    };
+    use k256::Scalar;
+    use rand::{CryptoRng, Rng, RngCore};
+    use std::{collections::HashMap, iter::zip};
+    use tracing::debug;
 
-                // Make the participants
-                zip(configs, auxinfo_outputs)
-                    .map(|(config, auxinfo_output)| {
-                        let input = Input::new(auxinfo_output, share.clone(), 2)?;
-                        Self::new(sid, config.id(), config.other_ids().to_vec(), input)
-                    })
-                    .collect::<Result<Vec<_>>>()
-            }
-
-            pub fn initialize_tshare_message(&self, tshare_identifier: Identifier) -> Result<Message> {
-                let empty: [u8; 0] = [];
-                Message::new(
-                    MessageType::Tshare(TshareMessageType::Ready),
-                    tshare_identifier,
-                    self.id(),
-                    self.id(),
-                    &empty,
-                )
-            }
-        }
-
-        /// Delivers all messages into their respective participant's inboxes.
-        fn deliver_all(
-            messages: &[Message],
-            inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
-        ) {
-            for message in messages {
-                inboxes
-                    .get_mut(&message.to())
-                    .unwrap()
-                    .push(message.clone());
-            }
-        }
-
-        fn is_tshare_done(quorum: &[TshareParticipant]) -> bool {
-            for participant in quorum {
-                if *participant.status() != Status::TerminatedSuccessfully {
-                    return false;
-                }
-            }
-            true
-        }
-
-        #[allow(clippy::type_complexity)]
-        fn process_messages<R: RngCore + CryptoRng>(
-            quorum: &mut [TshareParticipant],
-            inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
+    impl TshareParticipant {
+        pub fn new_quorum<R: RngCore + CryptoRng>(
+            sid: Identifier,
+            quorum_size: usize,
+            share: Option<CoeffPrivate>,
             rng: &mut R,
-        ) -> Option<(usize, ProcessOutcome<Output>)> {
-            // Pick a random participant to process
-            let index = rng.gen_range(0..quorum.len());
-            let participant = quorum.get_mut(index).unwrap();
+        ) -> Result<Vec<Self>> {
+            // Prepare prereqs for making TshareParticipant's. Assume all the
+            // simulations are stable (e.g. keep config order)
+            let configs = ParticipantConfig::random_quorum(quorum_size, rng)?;
+            let auxinfo_outputs = auxinfo::Output::simulate_set(&configs, rng);
 
-            let inbox = inboxes.get_mut(&participant.id()).unwrap();
-            if inbox.is_empty() {
-                // No messages to process for this participant, so pick another participant
-                return None;
-            }
-            let message = inbox.remove(rng.gen_range(0..inbox.len()));
-            debug!(
-                "processing participant: {}, with message type: {:?} from {}",
-                &participant.id(),
-                &message.message_type(),
-                &message.from(),
-            );
-            Some((index, participant.process_message(rng, &message).unwrap()))
+            // Make the participants
+            zip(configs, auxinfo_outputs)
+                .map(|(config, auxinfo_output)| {
+                    let input = Input::new(auxinfo_output, share.clone(), 2)?;
+                    Self::new(sid, config.id(), config.other_ids().to_vec(), input)
+                })
+                .collect::<Result<Vec<_>>>()
         }
 
-        #[cfg_attr(feature = "flame_it", flame)]
-        #[test]
-        fn tshare_always_produces_valid_outputs() -> Result<()> {
-            for size in 2..4 {
-                tshare_produces_valid_outputs(size)?;
-            }
-            Ok(())
-        }
-
-        fn tshare_produces_valid_outputs(quorum_size: usize) -> Result<()> {
-            let mut rng = init_testing_with_seed(Default::default());
-            let sid = Identifier::random(&mut rng);
-            let test_share = Some(CoeffPrivate {
-                x: BigNumber::from(42),
-            });
-            let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, test_share, &mut rng)?;
-            let mut inboxes = HashMap::new();
-            for participant in &quorum {
-                let _ = inboxes.insert(participant.id(), vec![]);
-            }
-
-            let inputs = quorum.iter().map(|p| p.input.clone()).collect::<Vec<_>>();
-
-            let mut outputs = std::iter::repeat_with(|| None)
-                .take(quorum_size)
-                .collect::<Vec<_>>();
-
-            for participant in &quorum {
-                let inbox = inboxes.get_mut(&participant.id()).unwrap();
-                inbox.push(participant.initialize_tshare_message(sid)?);
-            }
-
-            while !is_tshare_done(&quorum) {
-                let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
-                    None => continue,
-                    Some(x) => x,
-                };
-
-                // Deliver messages and save outputs
-                match outcome {
-                    ProcessOutcome::Incomplete => {}
-                    ProcessOutcome::Processed(messages) => deliver_all(&messages, &mut inboxes),
-                    ProcessOutcome::Terminated(output) => outputs[index] = Some(output),
-                    ProcessOutcome::TerminatedForThisParticipant(output, messages) => {
-                        deliver_all(&messages, &mut inboxes);
-                        outputs[index] = Some(output);
-                    }
-                }
-            }
-
-            // Make sure every player got an output
-            let outputs: Vec<_> = outputs.into_iter().flatten().collect();
-            assert_eq!(outputs.len(), quorum_size);
-
-            // Make sure everybody agrees on the public parts.
-            dbg!(outputs.clone());
-            assert!(outputs
-                .windows(2)
-                .all(|o| o[0].public_coeffs() == o[1].public_coeffs()));
-            //assert!(outputs
-            //    .windows(2)
-            //    .all(|o| o[0].public_key_shares() == o[1].public_key_shares()));
-
-            // Check returned outputs
-            //
-            // Every participant should have a public output from every other participant
-            // and, for a given participant, they should be the same in every output
-            for participant in quorum.iter_mut() {
-                // Check that each participant fully completed its broadcast portion.
-                if let Status::ParticipantCompletedBroadcast(participants) =
-                    participant.broadcast_participant().status()
-                {
-                    assert_eq!(participants.len(), participant.other_ids().len());
-                } else {
-                    panic!("Broadcast not completed!");
-                }
-            }
-
-            // Check that each participant's own `CoeffPublic` corresponds to their
-            // `CoeffPrivate`
-            for (output, pid) in outputs
-                .iter()
-                .zip(quorum.iter().map(ProtocolParticipant::id))
-            {
-                let publics_coeffs = output
-                    .public_coeffs()
-                    .iter()
-                    .map(|coeff| CoeffPublic::new(*coeff.as_ref()))
-                    .collect::<Vec<_>>();
-                let public_share = TshareParticipant::eval_public_share(&publics_coeffs, pid)?;
-
-                let expected_public_share =
-                    CurvePoint::GENERATOR.multiply_by_bignum(output.private_key_share())?;
-                // if the output already contains the public key, then we don't need to recompute and check it here. 
-                assert_eq!(public_share, expected_public_share);
-
-                // get the public key from output and validate against the expected public share
-                let public_key = output.public_key_shares().iter().find(|x| x.participant() == pid).unwrap();
-                assert_eq!(public_key.as_ref(), &public_share);
-            }
-
-            let all_participants = quorum
-                .iter()
-                .map(|x| Scalar::from(x.id.as_u128() + 1u128))
-                .collect::<Vec<Scalar>>();
-
-            // Test lagrange_coefficient_at_zero return the correct coefficients in order to
-            // recompute the sum of initial additive shares
-            let mut sum_lagrange = Scalar::ZERO;
-            let mut sum_input_shares = Scalar::ZERO;
-            for (input, (output, pid)) in inputs
-                .iter()
-                .zip(outputs.iter().zip(all_participants.clone()))
-            {
-                if let Some(share) = input.share() {
-                    let input_share_scalar = bn_to_scalar(&share.x)?;
-                    let output_share_scalar = bn_to_scalar(output.private_key_share())?;
-                    let lagrange_coeff = lagrange_coefficient_at_zero(&pid, &all_participants);
-                    sum_lagrange += output_share_scalar * lagrange_coeff;
-                    sum_input_shares += input_share_scalar;
-                }
-            }
-            assert_eq!(sum_lagrange, sum_input_shares);
-
-            // validate the final public key, which is given by the sum of the public keys
-            // of all participants
-            let mut sum_public_keys_first = CurvePoint::IDENTITY;
-            for public_key in outputs.first().unwrap().public_key_shares() {
-                sum_public_keys_first = sum_public_keys_first + *public_key.as_ref();
-            }
-            for output in outputs.iter().skip(1) {
-                let mut sum_public_keys = CurvePoint::IDENTITY;
-                for public_key in output.public_key_shares() {
-                    sum_public_keys = sum_public_keys + *public_key.as_ref();
-                }
-                assert_eq!(sum_public_keys, sum_public_keys_first);
-            }
-
-            Ok(())
+        pub fn initialize_tshare_message(&self, tshare_identifier: Identifier) -> Result<Message> {
+            let empty: [u8; 0] = [];
+            Message::new(
+                MessageType::Tshare(TshareMessageType::Ready),
+                tshare_identifier,
+                self.id(),
+                self.id(),
+                &empty,
+            )
         }
     }
+
+    /// Delivers all messages into their respective participant's inboxes.
+    fn deliver_all(
+        messages: &[Message],
+        inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
+    ) {
+        for message in messages {
+            inboxes
+                .get_mut(&message.to())
+                .unwrap()
+                .push(message.clone());
+        }
+    }
+
+    fn is_tshare_done(quorum: &[TshareParticipant]) -> bool {
+        for participant in quorum {
+            if *participant.status() != Status::TerminatedSuccessfully {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn process_messages<R: RngCore + CryptoRng>(
+        quorum: &mut [TshareParticipant],
+        inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
+        rng: &mut R,
+    ) -> Option<(usize, ProcessOutcome<Output>)> {
+        // Pick a random participant to process
+        let index = rng.gen_range(0..quorum.len());
+        let participant = quorum.get_mut(index).unwrap();
+
+        let inbox = inboxes.get_mut(&participant.id()).unwrap();
+        if inbox.is_empty() {
+            // No messages to process for this participant, so pick another participant
+            return None;
+        }
+        let message = inbox.remove(rng.gen_range(0..inbox.len()));
+        debug!(
+            "processing participant: {}, with message type: {:?} from {}",
+            &participant.id(),
+            &message.message_type(),
+            &message.from(),
+        );
+        Some((index, participant.process_message(rng, &message).unwrap()))
+    }
+
+    #[cfg_attr(feature = "flame_it", flame)]
+    #[test]
+    fn tshare_always_produces_valid_outputs() -> Result<()> {
+        for size in 2..4 {
+            tshare_produces_valid_outputs(size)?;
+        }
+        Ok(())
+    }
+
+    fn tshare_produces_valid_outputs(quorum_size: usize) -> Result<()> {
+        let mut rng = init_testing_with_seed(Default::default());
+        let sid = Identifier::random(&mut rng);
+        let test_share = Some(CoeffPrivate {
+            x: BigNumber::from(42),
+        });
+        let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, test_share, &mut rng)?;
+        let mut inboxes = HashMap::new();
+        for participant in &quorum {
+            let _ = inboxes.insert(participant.id(), vec![]);
+        }
+
+        let inputs = quorum.iter().map(|p| p.input.clone()).collect::<Vec<_>>();
+
+        let mut outputs = std::iter::repeat_with(|| None)
+            .take(quorum_size)
+            .collect::<Vec<_>>();
+
+        for participant in &quorum {
+            let inbox = inboxes.get_mut(&participant.id()).unwrap();
+            inbox.push(participant.initialize_tshare_message(sid)?);
+        }
+
+        while !is_tshare_done(&quorum) {
+            let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
+                None => continue,
+                Some(x) => x,
+            };
+
+            // Deliver messages and save outputs
+            match outcome {
+                ProcessOutcome::Incomplete => {}
+                ProcessOutcome::Processed(messages) => deliver_all(&messages, &mut inboxes),
+                ProcessOutcome::Terminated(output) => outputs[index] = Some(output),
+                ProcessOutcome::TerminatedForThisParticipant(output, messages) => {
+                    deliver_all(&messages, &mut inboxes);
+                    outputs[index] = Some(output);
+                }
+            }
+        }
+
+        // Make sure every player got an output
+        let outputs: Vec<_> = outputs.into_iter().flatten().collect();
+        assert_eq!(outputs.len(), quorum_size);
+
+        // Make sure everybody agrees on the public parts.
+        dbg!(outputs.clone());
+        assert!(outputs
+            .windows(2)
+            .all(|o| o[0].public_coeffs() == o[1].public_coeffs()));
+        //assert!(outputs
+        //    .windows(2)
+        //    .all(|o| o[0].public_key_shares() == o[1].public_key_shares()));
+
+        // Check returned outputs
+        //
+        // Every participant should have a public output from every other participant
+        // and, for a given participant, they should be the same in every output
+        for participant in quorum.iter_mut() {
+            // Check that each participant fully completed its broadcast portion.
+            if let Status::ParticipantCompletedBroadcast(participants) =
+                participant.broadcast_participant().status()
+            {
+                assert_eq!(participants.len(), participant.other_ids().len());
+            } else {
+                panic!("Broadcast not completed!");
+            }
+        }
+
+        // Check that each participant's own `CoeffPublic` corresponds to their
+        // `CoeffPrivate`
+        for (output, pid) in outputs
+            .iter()
+            .zip(quorum.iter().map(ProtocolParticipant::id))
+        {
+            let publics_coeffs = output
+                .public_coeffs()
+                .iter()
+                .map(|coeff| CoeffPublic::new(*coeff.as_ref()))
+                .collect::<Vec<_>>();
+            let public_share = TshareParticipant::eval_public_share(&publics_coeffs, pid)?;
+
+            let expected_public_share =
+                CurvePoint::GENERATOR.multiply_by_bignum(output.private_key_share())?;
+            // if the output already contains the public key, then we don't need to
+            // recompute and check it here.
+            assert_eq!(public_share, expected_public_share);
+
+            // get the public key from output and validate against the expected public share
+            let public_key = output
+                .public_key_shares()
+                .iter()
+                .find(|x| x.participant() == pid)
+                .unwrap();
+            assert_eq!(public_key.as_ref(), &public_share);
+        }
+
+        let all_participants = quorum
+            .iter()
+            .map(|x| Scalar::from(x.id.as_u128() + 1u128))
+            .collect::<Vec<Scalar>>();
+
+        // Test lagrange_coefficient_at_zero return the correct coefficients in order to
+        // recompute the sum of initial additive shares
+        let mut sum_lagrange = Scalar::ZERO;
+        let mut sum_input_shares = Scalar::ZERO;
+        for (input, (output, pid)) in inputs
+            .iter()
+            .zip(outputs.iter().zip(all_participants.clone()))
+        {
+            if let Some(share) = input.share() {
+                let input_share_scalar = bn_to_scalar(&share.x)?;
+                let output_share_scalar = bn_to_scalar(output.private_key_share())?;
+                let lagrange_coeff = lagrange_coefficient_at_zero(&pid, &all_participants);
+                sum_lagrange += output_share_scalar * lagrange_coeff;
+                sum_input_shares += input_share_scalar;
+            }
+        }
+        assert_eq!(sum_lagrange, sum_input_shares);
+
+        // validate the final public key, which is given by the sum of the public keys
+        // of all participants
+        let mut sum_public_keys_first = CurvePoint::IDENTITY;
+        for public_key in outputs.first().unwrap().public_key_shares() {
+            sum_public_keys_first = sum_public_keys_first + *public_key.as_ref();
+        }
+        for output in outputs.iter().skip(1) {
+            let mut sum_public_keys = CurvePoint::IDENTITY;
+            for public_key in output.public_key_shares() {
+                sum_public_keys = sum_public_keys + *public_key.as_ref();
+            }
+            assert_eq!(sum_public_keys, sum_public_keys_first);
+        }
+
+        Ok(())
+    }
+}

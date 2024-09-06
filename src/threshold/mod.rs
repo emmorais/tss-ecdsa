@@ -1,20 +1,4 @@
 use k256::{elliptic_curve::Field, Scalar};
-use rand::Rng;
-
-fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
-    let mut coefficients = Vec::with_capacity(t);
-    for _ in 0..t {
-        coefficients.push(Scalar::random(&mut *rng));
-    }
-    coefficients
-}
-
-pub fn evaluate_polynomial(coefficients: &[Scalar], x: &Scalar) -> Scalar {
-    coefficients
-        .iter()
-        .rev()
-        .fold(Scalar::ZERO, |acc, coef| acc * x + coef)
-}
 
 pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar>) -> Scalar {
     let mut result = Scalar::ONE;
@@ -29,29 +13,44 @@ pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar
     result
 }
 
-pub fn lagrange_coefficient(my_point: &Scalar, other_points: &Vec<Scalar>) -> Scalar {
-    let mut result = Scalar::ONE;
-    for point in other_points {
-        if point != my_point {
-            let denominator = my_point - point;
-            let inv = denominator.invert().unwrap();
-            result *= point * &inv;
-        }
-    }
-    result
-}
-
-fn evaluate_at_points(coefficients: &[Scalar], points: &[Scalar]) -> Vec<Scalar> {
-    points
-        .iter()
-        .map(|x| evaluate_polynomial(coefficients, x))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
+
+    fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
+        let mut coefficients = Vec::with_capacity(t);
+        for _ in 0..t {
+            coefficients.push(Scalar::random(&mut *rng));
+        }
+        coefficients
+    }
+
+    pub fn evaluate_polynomial(coefficients: &[Scalar], x: &Scalar) -> Scalar {
+        coefficients
+            .iter()
+            .rev()
+            .fold(Scalar::ZERO, |acc, coef| acc * x + coef)
+    }
+
+    pub fn lagrange_coefficient(my_point: &Scalar, other_points: &Vec<Scalar>) -> Scalar {
+        let mut result = Scalar::ONE;
+        for point in other_points {
+            if point != my_point {
+                let denominator = my_point - point;
+                let inv = denominator.invert().unwrap();
+                result *= point * &inv;
+            }
+        }
+        result
+    }
+
+    fn evaluate_at_points(coefficients: &[Scalar], points: &[Scalar]) -> Vec<Scalar> {
+        points
+            .iter()
+            .map(|x| evaluate_polynomial(coefficients, x))
+            .collect()
+    }
 
     #[test]
     fn test_generate_and_evaluate_polynomial() {
@@ -107,7 +106,7 @@ mod tests {
     fn test_evaluate_points_at_zero() {
         let mut rng = thread_rng();
         let t: u32 = 3;
-        let n: u32 = 6;
+        let n: u32 = 7;
         let coefficients = generate_polynomial(t as usize, &mut rng);
 
         // test that reconstruction works as long as we have enough points

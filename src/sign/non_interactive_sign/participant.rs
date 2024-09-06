@@ -416,7 +416,6 @@ impl SignParticipant {
             .map(|pid| self.storage.remove::<storage::Share>(pid))
             .collect::<Result<Vec<_>>>()?;
 
-
         let x_projection = self.storage.remove::<storage::XProj>(self.id())?;
 
         // Sum up the signature shares and convert to BIP-0062 format (negating if the
@@ -666,7 +665,6 @@ mod test {
         Ok(())
     }
 
-
     // test threshold signature with less than t participants
     #[test]
     fn signing_fails_with_less_than_threshold() -> Result<()> {
@@ -674,19 +672,27 @@ mod test {
         let threshold = 3;
         let rng = &mut init_testing();
         let sid = Identifier::random(rng);
-        
+
         // create participant_ids
         let id = ParticipantIdentifier::random(rng);
         // not enough other participants
-        let other_participant_ids = (0..threshold-2).map(|_| ParticipantIdentifier::random(rng)).collect::<Vec<_>>();
-        let participant_ids = std::iter::once(id).chain(other_participant_ids.clone()).collect::<Vec<_>>();
+        let other_participant_ids = (0..threshold - 2)
+            .map(|_| ParticipantIdentifier::random(rng))
+            .collect::<Vec<_>>();
+        let participant_ids = std::iter::once(id)
+            .chain(other_participant_ids.clone())
+            .collect::<Vec<_>>();
 
         // create input
         let message = b"the quick brown fox jumped over the lazy dog";
         let keygen_output = keygen::Output::simulate(&participant_ids, rng);
         let presign_record = PresignRecord::simulate(rng);
-        let input = sign::Input::new(message, presign_record, keygen_output.public_key_shares().to_vec(), threshold);
-
+        let input = sign::Input::new(
+            message,
+            presign_record,
+            keygen_output.public_key_shares().to_vec(),
+            threshold,
+        );
 
         let participant = SignParticipant::new(sid, id, other_participant_ids, input);
         assert!(participant.is_err());

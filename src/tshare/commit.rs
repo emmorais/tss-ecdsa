@@ -134,7 +134,7 @@ impl std::fmt::Debug for TshareDecommit {
             .field("sid", &self.sid)
             .field("sender", &self.sender)
             .field("coeff_publics", &self.coeff_publics)
-            .field("...", &"[redacted]") 
+            .field("...", &"[redacted]")
             .finish()
     }
 }
