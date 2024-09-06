@@ -95,10 +95,7 @@ impl TshareDecommit {
         threshold: usize,
     ) -> Result<()> {
         // Check the commitment.
-        dbg!(self); // Although it verifies, it is not the same as the original commitment.
-        //dbg!(com.clone());
         let rebuilt_com = self.commit()?;
-        //dbg!(rebuilt_com.clone());
         if &rebuilt_com != com {
             error!("decommitment does not match original commitment");
             return Err(InternalError::ProtocolError(Some(sender)));
@@ -137,7 +134,7 @@ impl std::fmt::Debug for TshareDecommit {
             .field("sid", &self.sid)
             .field("sender", &self.sender)
             .field("coeff_publics", &self.coeff_publics)
-            //.field("...", &"[redacted]") // TODO: undo this change
+            .field("...", &"[redacted]") 
             .finish()
     }
 }

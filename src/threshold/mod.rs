@@ -102,4 +102,29 @@ mod tests {
             assert_eq!(evaluate_polynomial(&coefficients, x), *y);
         }
     }
+
+    #[test]
+    fn test_evaluate_points_at_zero() {
+        let mut rng = thread_rng();
+        let t: u32 = 3;
+        let n: u32 = 6;
+        let coefficients = generate_polynomial(t as usize, &mut rng);
+
+        // test that reconstruction works as long as we have enough points
+        for n in t..n {
+            let points: Vec<Scalar> = (1..=n).map(|i: u32| Scalar::from(i)).collect();
+            let values = evaluate_at_points(&coefficients, &points);
+
+            let zero = Scalar::ZERO;
+            let zero_value = evaluate_polynomial(&coefficients, &zero);
+
+            let zero_value_reconstructed = values
+                .iter()
+                .zip(&points)
+                .map(|(value, point)| *value * lagrange_coefficient_at_zero(point, &points))
+                .fold(Scalar::ZERO, |acc, x| acc + x);
+
+            assert_eq!(zero_value, zero_value_reconstructed);
+        }
+    }
 }

@@ -615,7 +615,7 @@ mod tests {
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
-    use std::{collections::HashMap, thread::panicking, vec};
+    use std::{collections::HashMap, vec};
     use tracing::debug;
 
     // Negative test checking whether the message has the correct session id
@@ -927,7 +927,7 @@ mod tests {
 
         // Tshare protocol
         let mut keygen_outputs_tshare = keygen_outputs.clone();
-        let mut auxinfo_outputs_tshare = auxinfo_outputs.clone();
+        let auxinfo_outputs_tshare = auxinfo_outputs.clone();
         // Set up tshare participants
         let tshare_sid = Identifier::random(&mut rng);
 
@@ -1039,13 +1039,11 @@ mod tests {
             );
             let mut toft_private_key_tshare = bn_to_scalar(private_key_tshare)?; 
             toft_private_key_tshare *= lagrange_coefficients_at_zero; 
-            // convert toft_private_key_tshare to BigNumber
-            // TODO: create function scalar_to_bn?
             let toft_private_key_tshare = BigNumber::from_slice(&toft_private_key_tshare.to_bytes());
             let public_toft_key_tshare = CurvePoint::GENERATOR.multiply_by_bignum(&toft_private_key_tshare)?; 
             //toft_keys.push((participant.id(), toft_private_key_tshare, public_toft_key_tshare));
-            toft_private_keys.insert(participant.id(), toft_private_key_tshare);
-            toft_public_keys_dict.insert(participant.id(), public_toft_key_tshare);
+            assert!(toft_private_keys.insert(participant.id(), toft_private_key_tshare).is_none());
+            assert!(toft_public_keys_dict.insert(participant.id(), public_toft_key_tshare).is_none());
             toft_public_keys.push(KeySharePublic::new(participant.id(), public_toft_key_tshare));
         }
 
@@ -1065,7 +1063,7 @@ mod tests {
                 KeySharePrivate::from_bigint(&private_key), 
                 *rid
             )?;
-            toft_keygen_outputs.insert(pid, output);
+            assert!(toft_keygen_outputs.insert(pid, output).is_none());
         }        
         
         dbg!(toft_public_keys.clone());
@@ -1081,7 +1079,7 @@ mod tests {
         // if we multiply each public key share with the corresponding lagrange coefficient at zero, we should get the same public key
         // as obtained from the toft private key shares (as above)
         // so for each element in public_key_tshares, multiply it with the corresponding lagrange coefficient at zero
-        for (i, public_key_share) in public_key_tshares.iter().enumerate() {
+        for public_key_share in public_key_tshares.iter() {
             let participant: ParticipantIdentifier = public_key_share.participant();
             let pid = participant.0;
             let my_point = Scalar::from_u128(pid + 1u128);

@@ -408,8 +408,6 @@ impl SignParticipant {
     fn compute_output(&mut self) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         // Retrieve everyone's share and the x-projection we saved in round one
         // (This will fail if we're missing any shares)
-        // TODO: if less than t participants are present, then the protocol should fail
-        // (in a different place? first round?)
 
         // Retrieve everyone's id and share
         let shares = self
@@ -448,6 +446,7 @@ impl SignParticipant {
 
 #[cfg(test)]
 mod test {
+    use crate::ParticipantIdentifier;
     use std::collections::HashMap;
 
     use k256::{
@@ -664,6 +663,33 @@ mod test {
             "Recovered public key does not match original one."
         );
 
+        Ok(())
+    }
+
+
+    // test threshold signature with less than t participants
+    #[test]
+    fn signing_fails_with_less_than_threshold() -> Result<()> {
+        // create SignParticipant
+        let threshold = 3;
+        let rng = &mut init_testing();
+        let sid = Identifier::random(rng);
+        
+        // create participant_ids
+        let id = ParticipantIdentifier::random(rng);
+        // not enough other participants
+        let other_participant_ids = (0..threshold-2).map(|_| ParticipantIdentifier::random(rng)).collect::<Vec<_>>();
+        let participant_ids = std::iter::once(id).chain(other_participant_ids.clone()).collect::<Vec<_>>();
+
+        // create input
+        let message = b"the quick brown fox jumped over the lazy dog";
+        let keygen_output = keygen::Output::simulate(&participant_ids, rng);
+        let presign_record = PresignRecord::simulate(rng);
+        let input = sign::Input::new(message, presign_record, keygen_output.public_key_shares().to_vec(), threshold);
+
+
+        let participant = SignParticipant::new(sid, id, other_participant_ids, input);
+        assert!(participant.is_err());
         Ok(())
     }
 }
