@@ -1,5 +1,9 @@
-use k256::{elliptic_curve::Field, Scalar};
+//! Auxiliary function for Lagrange interpolation
 
+use k256::Scalar;
+
+/// Compute the Lagrange coefficient evaluated at zero.
+/// This is used to reconstruct the secret from the shares.
 pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar>) -> Scalar {
     let mut result = Scalar::ONE;
     for point in other_points {
@@ -17,6 +21,7 @@ pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar
 mod tests {
     use super::*;
     use rand::{thread_rng, Rng};
+    use k256::elliptic_curve::Field;
 
     fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
         let mut coefficients = Vec::with_capacity(t);

@@ -220,7 +220,7 @@ pub mod presign;
 mod protocol;
 mod ring_pedersen;
 pub mod sign;
-mod threshold;
+pub mod threshold;
 pub mod tshare;
 mod utils;
 mod zkp;

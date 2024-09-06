@@ -56,7 +56,8 @@ impl Output {
         &self.public_coeffs
     }
 
-    pub(crate) fn private_key_share(&self) -> &BigNumber {
+    /// Get the private share
+    pub fn private_key_share(&self) -> &BigNumber {
         &self.private_key_share
     }
 
