@@ -20,8 +20,8 @@ pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
     use k256::elliptic_curve::Field;
+    use rand::{thread_rng, Rng};
 
     fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
         let mut coefficients = Vec::with_capacity(t);
