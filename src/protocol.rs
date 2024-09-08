@@ -930,17 +930,6 @@ mod tests {
             .iter()
             .all(|p| *p.status() == Status::TerminatedSuccessfully));
 
-        // Save the public key and key shares for later
-        let public_key_shares = keygen_outputs
-            .get(&configs.first().unwrap().id())
-            .unwrap()
-            .public_key_shares()
-            .to_vec();
-        let saved_public_key = keygen_outputs
-            .get(&configs.first().unwrap().id())
-            .unwrap()
-            .public_key()?;
-
         // Tshare protocol
         let mut keygen_outputs_tshare = keygen_outputs.clone();
         let auxinfo_outputs_tshare = auxinfo_outputs.clone();
@@ -1082,8 +1071,6 @@ mod tests {
             assert!(toft_keygen_outputs.insert(pid, output).is_none());
         }
 
-        dbg!(toft_public_keys.clone());
-
         // Check the sum is indeed the sum of original private keys used as input of
         // tshare
         let mut sum_tshare_input = tshare_inputs
@@ -1119,6 +1106,11 @@ mod tests {
                 *toft_public_keys_dict.get(&participant).unwrap()
             );
         }
+
+        let saved_public_key = toft_keygen_outputs
+            .get(&configs.first().unwrap().id())
+            .unwrap()
+            .public_key()?;
 
         // Set up presign participants
         // Clone auxinfo outputs for presigning
@@ -1191,7 +1183,7 @@ mod tests {
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
                 let input =
-                    sign::Input::new(message, record, public_key_shares.clone(), QUORUM_THRESHOLD);
+                    sign::Input::new(message, record, toft_public_keys.clone(), QUORUM_THRESHOLD);
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
