@@ -70,7 +70,10 @@ pub struct CoeffPrivate {
 
 impl Debug for CoeffPrivate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("CoeffPrivate([redacted])")
+        // TODO: revert this change
+        //f.write_str("CoeffPrivate([redacted])")
+        // print the actual value for debugging purposes
+        f.debug_tuple("CoeffPrivate").field(&self.x).finish()
     }
 }
 

@@ -823,7 +823,7 @@ impl TshareParticipant {
                 let public_share = KeySharePublic::new(*pid, public_share);
                 all_public_keys.push(public_share);
             }
-            all_public_keys.push(KeySharePublic::new(self.id(), expected_public));
+            all_public_keys.push(KeySharePublic::new(self.id(), implied_public));
             dbg!(all_public_keys.clone());
 
             let all_public_coeffs_clone = all_public_coeffs.clone();
@@ -845,8 +845,8 @@ impl TshareParticipant {
                 return Err(InternalError::ProtocolError(None));
             };
 
-            // Check if the share is consistent, it must have a public key that corresponds
-            // right public coefficient
+            // Check if the share is consistent, it must have an old public key that
+            // corresponds to the its input share
             if let Some(share) = self.input.share() {
                 let old_public_key = share.public_point()?;
                 let last = coeffs_from_all.len() - 1;
@@ -1061,13 +1061,16 @@ mod tests {
         assert_eq!(outputs.len(), quorum_size);
 
         // Make sure everybody agrees on the public parts.
-        dbg!(outputs.clone());
         assert!(outputs
             .windows(2)
             .all(|o| o[0].public_coeffs() == o[1].public_coeffs()));
-        //assert!(outputs
-        //    .windows(2)
-        //    .all(|o| o[0].public_key_shares() == o[1].public_key_shares()));
+        assert!(outputs.windows(2).all(|o| {
+            let first_pks = o[0].public_key_shares();
+            let second_pks = o[1].public_key_shares();
+            // for each element in first_pks, there must be a corresponding element in
+            // second_pks
+            first_pks.iter().all(|x| second_pks.iter().any(|y| x == y))
+        }));
 
         // Check returned outputs
         //
