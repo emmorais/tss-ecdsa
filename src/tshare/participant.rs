@@ -8,6 +8,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use std::collections::HashMap;
+
 use super::{
     commit::{TshareCommit, TshareDecommit},
     share::{CoeffPrivate, CoeffPublic, EvalEncrypted},
@@ -15,7 +17,7 @@ use super::{
 use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
     errors::{CallerError, InternalError, Result},
-    keygen::KeySharePublic,
+    keygen::{KeySharePrivate, KeySharePublic},
     local_storage::LocalStorage,
     messages::{Message, MessageType, TshareMessageType},
     participant::{
@@ -23,11 +25,12 @@ use crate::{
     },
     protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once,
-    utils::{k256_order, CurvePoint},
+    utils::{bn_to_scalar, k256_order, CurvePoint},
     zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
     Identifier, ParticipantConfig,
 };
 
+use k256::Scalar;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -667,6 +670,92 @@ impl TshareParticipant {
         Ok(sum)
     }
 
+    /// Convert the tshares to t-out-of-t shares.
+    /// This is done by multiplying the shares by the Lagrange coefficients.
+    /// Since the constant term is the secret, we need to multiply by the
+    /// Lagrange coefficient at zero. This is done by the function
+    /// `lagrange_coefficient_at_zero`.
+    pub fn convert_to_t_out_of_t_shares(
+        shares: HashMap<ParticipantIdentifier, KeySharePrivate>,
+        all: Vec<ParticipantIdentifier>,
+    ) -> Result<HashMap<ParticipantIdentifier, KeySharePrivate>> {
+        let mut new_shares = HashMap::new();
+        for (id, share) in shares.iter() {
+            let lagrange = Self::lagrange_coefficient_at_zero(id, &all);
+            let new_share: BigNumber =
+                share.clone().as_ref() * BigNumber::from_slice(lagrange.to_bytes());
+            assert!(new_shares
+                .insert(*id, KeySharePrivate::from_bigint(&new_share))
+                .is_none());
+        }
+        Ok(new_shares)
+    }
+
+    /// Get all the public keys from the shares.
+    pub fn get_all_public_keys(
+        shares: HashMap<ParticipantIdentifier, KeySharePublic>,
+    ) -> Vec<KeySharePublic> {
+        shares.values().cloned().collect()
+    }
+
+    /// Convert the public tshares in the same way as the private shares.
+    /// This is done by multiplying the public shares by the Lagrange
+    /// coefficients. Since the constant term is the secret, we need to
+    /// multiply by the Lagrange coefficient at zero. This is done by the
+    /// function `lagrange_coefficient_at_zero`. The public shares are
+    /// represented as EC points.
+    pub fn convert_public_shares_to_t_out_of_t_shares(
+        shares: HashMap<ParticipantIdentifier, KeySharePublic>,
+        all: Vec<ParticipantIdentifier>,
+    ) -> Result<HashMap<ParticipantIdentifier, KeySharePublic>> {
+        let mut new_shares = HashMap::new();
+        for (id, share) in shares.iter() {
+            let lagrange = Self::lagrange_coefficient_at_zero(id, &all);
+            let new_share = share.as_ref().multiply_by_scalar(&lagrange);
+            assert!(new_shares
+                .insert(*id, KeySharePublic::new(*id, new_share))
+                .is_none());
+        }
+        Ok(new_shares)
+    }
+
+    /// Reconstruct the secret from the shares.
+    /// Use lagrange_coefficients_at_zero to get the constant term.
+    pub fn reconstruct_secret(
+        shares: HashMap<ParticipantIdentifier, KeySharePrivate>,
+        all: Vec<ParticipantIdentifier>,
+    ) -> Result<Scalar> {
+        let mut secret = Scalar::ZERO;
+        // compute the coordinates
+        for (id, share) in shares.iter() {
+            let lagrange = Self::lagrange_coefficient_at_zero(id, &all);
+            let t_out_of_t_share = lagrange * bn_to_scalar(share.clone().as_ref()).unwrap();
+            secret += t_out_of_t_share;
+        }
+        Ok(secret)
+    }
+
+    /// Compute the Lagrange coefficient evaluated at zero.
+    /// This is used to reconstruct the secret from the shares.
+    pub fn lagrange_coefficient_at_zero(
+        my_point: &ParticipantIdentifier,
+        other_points: &Vec<ParticipantIdentifier>,
+    ) -> Scalar {
+        let mut result = Scalar::ONE;
+        for point in other_points {
+            if point != my_point {
+                let point_coordinate = bn_to_scalar(&Self::participant_coordinate(*point)).unwrap();
+                let my_point_coordinate =
+                    bn_to_scalar(&Self::participant_coordinate(*my_point)).unwrap();
+                let numerator = Scalar::ZERO - point_coordinate;
+                let denominator = my_point_coordinate - point_coordinate;
+                let inv = denominator.invert().unwrap();
+                result *= numerator * inv;
+            }
+        }
+        result
+    }
+
     /// Handle round three messages only after our own `gen_round_three_msgs`.
     fn can_handle_round_three_msg(&self) -> bool {
         self.local_storage.contains::<storage::GlobalRid>(self.id())
@@ -824,7 +913,6 @@ impl TshareParticipant {
                 all_public_keys.push(public_share);
             }
             all_public_keys.push(KeySharePublic::new(self.id(), implied_public));
-            dbg!(all_public_keys.clone());
 
             let all_public_coeffs_clone = all_public_coeffs.clone();
             // Return the output and stop.
@@ -915,14 +1003,9 @@ fn schnorr_proof_transcript(
 #[cfg(test)]
 mod tests {
     use super::{super::input::Input, *};
-    use crate::{
-        auxinfo,
-        threshold::lagrange_coefficient_at_zero,
-        utils::{bn_to_scalar, testing::init_testing_with_seed},
-        Identifier, ParticipantConfig,
-    };
-    use k256::Scalar;
-    use rand::{CryptoRng, Rng, RngCore};
+    use crate::{auxinfo, utils::testing::init_testing_with_seed, Identifier, ParticipantConfig};
+    use k256::elliptic_curve::{Field, PrimeField};
+    use rand::{thread_rng, CryptoRng, Rng, RngCore};
     use std::{collections::HashMap, iter::zip};
     use tracing::debug;
 
@@ -1027,8 +1110,6 @@ mod tests {
             let _ = inboxes.insert(participant.id(), vec![]);
         }
 
-        let inputs = quorum.iter().map(|p| p.input.clone()).collect::<Vec<_>>();
-
         let mut outputs = std::iter::repeat_with(|| None)
             .take(quorum_size)
             .collect::<Vec<_>>();
@@ -1115,14 +1196,9 @@ mod tests {
             assert_eq!(public_key.as_ref(), &public_share);
         }
 
-        let all_participants = quorum
-            .iter()
-            .map(|x| Scalar::from(x.id.as_u128() + 1u128))
-            .collect::<Vec<Scalar>>();
-
         // Test lagrange_coefficient_at_zero return the correct coefficients in order to
         // recompute the sum of initial additive shares
-        let mut sum_lagrange = Scalar::ZERO;
+        /*let mut sum_lagrange = Scalar::ZERO;
         let mut sum_input_shares = Scalar::ZERO;
         for (input, (output, pid)) in inputs
             .iter()
@@ -1136,7 +1212,7 @@ mod tests {
                 sum_input_shares += input_share_scalar;
             }
         }
-        assert_eq!(sum_lagrange, sum_input_shares);
+        assert_eq!(sum_lagrange, sum_input_shares);*/
 
         // validate the final public key, which is given by the sum of the public keys
         // of all participants
@@ -1153,5 +1229,57 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    fn generate_polynomial<R: Rng>(t: usize, rng: &mut R) -> Vec<Scalar> {
+        let mut coefficients = Vec::with_capacity(t);
+        for _ in 0..t {
+            coefficients.push(Scalar::random(&mut *rng));
+        }
+        coefficients
+    }
+
+    pub fn evaluate_polynomial(coefficients: &[Scalar], x: &Scalar) -> Scalar {
+        coefficients
+            .iter()
+            .rev()
+            .fold(Scalar::ZERO, |acc, coef| acc * x + coef)
+    }
+
+    fn evaluate_at_points(coefficients: &[Scalar], points: &[Scalar]) -> Vec<Scalar> {
+        points
+            .iter()
+            .map(|x| evaluate_polynomial(coefficients, x))
+            .collect()
+    }
+
+    #[test]
+    fn test_evaluate_points_at_zero() {
+        let mut rng = thread_rng();
+        let t: u128 = 3;
+        let n: u128 = 7;
+        let coefficients = generate_polynomial(t as usize, &mut rng);
+
+        // test that reconstruction works as long as we have enough points
+        for n in t..n {
+            let points: Vec<Scalar> = (1..=n).map(|i: u128| Scalar::from_u128(i + 1)).collect();
+            let values = evaluate_at_points(&coefficients, &points);
+
+            let zero = Scalar::ZERO;
+            let zero_value = evaluate_polynomial(&coefficients, &zero);
+
+            let points: Vec<ParticipantIdentifier> = (1..=n)
+                .map(|i: u128| ParticipantIdentifier::from_u128(i))
+                .collect();
+            let zero_value_reconstructed = values
+                .iter()
+                .zip(&points)
+                .map(|(value, point)| {
+                    *value * TshareParticipant::lagrange_coefficient_at_zero(point, &points)
+                })
+                .fold(Scalar::ZERO, |acc, x| acc + x);
+
+            assert_eq!(zero_value, zero_value_reconstructed);
+        }
     }
 }

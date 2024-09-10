@@ -626,12 +626,11 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
-        threshold,
         tshare::{self, CoeffPrivate, TshareParticipant},
-        utils::{bn_to_scalar, testing::init_testing},
+        utils::testing::init_testing,
         PresignParticipant,
     };
-    use k256::{ecdsa::signature::DigestVerifier, elliptic_curve::PrimeField, Scalar};
+    use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
     use std::{collections::HashMap, vec};
@@ -832,6 +831,8 @@ mod tests {
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
         let result = full_protocol_execution_with_noninteractive_signing_works(3, 3, 3);
         assert!(result.is_ok());
+        let result = full_protocol_execution_with_noninteractive_signing_works(3, 2, 3);
+        assert!(result.is_ok());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(
@@ -1011,49 +1012,38 @@ mod tests {
         // lagrange_coefficients_at_zero, need to have the final quorum (with
         // more than t participants), then we collect all the private key
         // tshares together with the corresponding public key shares
-        // for each participant in the quorum, calculate the
-        // lagrange_coefficients_at_zero, multiply it with the private key tshare
-        // and store together with the public key share
         // TODO this should be reorganized into different components and functions
-        let mut toft_private_keys: HashMap<ParticipantIdentifier, BigNumber> = HashMap::new();
-        let mut toft_public_keys_dict: HashMap<ParticipantIdentifier, CurvePoint> = HashMap::new();
-        let mut toft_public_keys = vec![];
-        for participant in &configs {
-            let my_point = Scalar::from_u128(participant.id().as_u128() + 1u128);
-            let other_points = configs
-                .iter()
-                .filter(|p| p.id() != participant.id())
-                .map(|p| Scalar::from_u128(p.id().as_u128() + 1u128))
-                .collect::<Vec<_>>();
-            let private_key_tshare = tshare_outputs
-                .get(&participant.id())
-                .unwrap()
-                .private_key_share();
-            let lagrange_coefficients_at_zero =
-                threshold::lagrange_coefficient_at_zero(&my_point, &other_points);
-            let mut toft_private_key_tshare = bn_to_scalar(private_key_tshare)?;
-            toft_private_key_tshare *= lagrange_coefficients_at_zero;
-            let toft_private_key_tshare = BigNumber::from_slice(toft_private_key_tshare.to_bytes());
-            let public_toft_key_tshare =
-                CurvePoint::GENERATOR.multiply_by_bignum(&toft_private_key_tshare)?;
-            //toft_keys.push((participant.id(), toft_private_key_tshare,
-            // public_toft_key_tshare));
-            assert!(toft_private_keys
-                .insert(participant.id(), toft_private_key_tshare)
+        let mut tshare_output_private_keys: HashMap<ParticipantIdentifier, KeySharePrivate> =
+            HashMap::new();
+        let mut tshare_output_public_keys: HashMap<ParticipantIdentifier, KeySharePublic> =
+            HashMap::new();
+        for pid in tshare_outputs.keys() {
+            let output = tshare_outputs.get(pid).unwrap();
+            let private_key = output.private_key_share();
+            let private_keyshare = KeySharePrivate::from_bigint(private_key);
+            assert!(tshare_output_private_keys
+                .insert(*pid, private_keyshare)
                 .is_none());
-            assert!(toft_public_keys_dict
-                .insert(participant.id(), public_toft_key_tshare)
+            let public_key = CurvePoint::GENERATOR
+                .multiply_by_bignum(private_key)
+                .unwrap();
+            assert!(tshare_output_public_keys
+                .insert(*pid, KeySharePublic::new(*pid, public_key))
                 .is_none());
-            toft_public_keys.push(KeySharePublic::new(
-                participant.id(),
-                public_toft_key_tshare,
-            ));
         }
+        let toft_private_keys = TshareParticipant::convert_to_t_out_of_t_shares(
+            tshare_output_private_keys,
+            configs[0].all_participants(),
+        )?;
+        let toft_public_keys_dict = TshareParticipant::convert_public_shares_to_t_out_of_t_shares(
+            tshare_output_public_keys,
+            configs[0].all_participants(),
+        )?;
+        let toft_public_keys =
+            TshareParticipant::get_all_public_keys(toft_public_keys_dict.clone());
 
         // Use these key pairs to proceed with the signing protocol, replace the
         // keygen_outputs with the t-out-of-t key pair for each id
-        // for each element in keygen_outputs, replace the private key share with the
-        // t-out-of-t private key share
         let mut toft_keygen_outputs: HashMap<
             ParticipantIdentifier,
             <KeygenParticipant as ProtocolParticipant>::Output,
@@ -1061,11 +1051,11 @@ mod tests {
         // get rid from first output
         let rid = keygen_outputs[&configs[0].id()].rid();
         let mut sum_toft_private_shares = BigNumber::zero();
-        for (pid, private_key) in toft_private_keys {
-            sum_toft_private_shares += private_key.clone();
+        for (pid, private_key_share) in toft_private_keys {
+            sum_toft_private_shares += private_key_share.as_ref().clone();
             let output = crate::keygen::Output::from_parts(
                 toft_public_keys.clone(),
-                KeySharePrivate::from_bigint(&private_key),
+                private_key_share,
                 *rid,
             )?;
             assert!(toft_keygen_outputs.insert(pid, output).is_none());
@@ -1080,7 +1070,7 @@ mod tests {
         // reduce mod the order
         sum_toft_private_shares %= k256_order();
         sum_tshare_input %= k256_order();
-        assert_eq!(sum_toft_private_shares, sum_tshare_input); // PASSED!
+        assert_eq!(sum_toft_private_shares, sum_tshare_input);
 
         // Validate the public key shares
         // if we multiply each public key share with the corresponding lagrange
@@ -1089,21 +1079,15 @@ mod tests {
         // public_key_tshares, multiply it with the corresponding lagrange coefficient
         // at zero
         for public_key_share in public_key_tshares.iter() {
+            let all = configs[0].all_participants();
             let participant: ParticipantIdentifier = public_key_share.participant();
-            let pid = participant.0;
-            let my_point = Scalar::from_u128(pid + 1u128);
-            let other_points = configs
-                .iter()
-                .filter(|p| p.id() != participant)
-                .map(|p| Scalar::from_u128(p.id().as_u128() + 1u128))
-                .collect::<Vec<_>>();
             let lagrange_coefficients_at_zero =
-                threshold::lagrange_coefficient_at_zero(&my_point, &other_points);
+                TshareParticipant::lagrange_coefficient_at_zero(&participant, &all);
             let point = public_key_share.as_ref();
             let public_key_share = point.multiply_by_scalar(&lagrange_coefficients_at_zero);
             assert_eq!(
                 public_key_share,
-                *toft_public_keys_dict.get(&participant).unwrap()
+                *toft_public_keys_dict.get(&participant).unwrap().as_ref()
             );
         }
 
@@ -1123,12 +1107,7 @@ mod tests {
             .map(|config| {
                 (
                     auxinfo_outputs_presign.remove(&config.id()).unwrap(),
-                    toft_keygen_outputs.remove(&config.id()).unwrap(), /* IF THIS IS USED
-                                                                        * VERIFICATION FAILS
-                                                                        * keygen_outputs.
-                                                                        * remove(&config.id()).
-                                                                        * unwrap(), // USE THIS
-                                                                        * TO MAKE TESTS PASS! */
+                    toft_keygen_outputs.remove(&config.id()).unwrap(),
                 )
             })
             .map(|(auxinfo_output, keygen_output)| {
