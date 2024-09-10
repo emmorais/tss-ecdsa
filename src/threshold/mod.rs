@@ -8,8 +8,8 @@ pub fn lagrange_coefficient_at_zero(my_point: &Scalar, other_points: &Vec<Scalar
     let mut result = Scalar::ONE;
     for point in other_points {
         if point != my_point {
-            // TODO: use participant_coordinate() instead of adding Scalar::ONE 
-            let numerator = Scalar::ZERO - (point + Scalar::ONE); 
+            // TODO: use participant_coordinate() instead of adding Scalar::ONE
+            let numerator = Scalar::ZERO - (point + Scalar::ONE);
             let denominator = my_point - point;
             let inv = denominator.invert().unwrap();
             result *= numerator * inv;
@@ -117,7 +117,7 @@ mod tests {
 
         // test that reconstruction works as long as we have enough points
         for n in t..n {
-            let points: Vec<Scalar> = (1..=n).map(|i: u32| Scalar::from(i+1)).collect(); // TODO: participant_coordinate is hardcoded here
+            let points: Vec<Scalar> = (1..=n).map(|i: u32| Scalar::from(i + 1)).collect(); // TODO: participant_coordinate is hardcoded here
             let values = evaluate_at_points(&coefficients, &points);
 
             let zero = Scalar::ZERO;
