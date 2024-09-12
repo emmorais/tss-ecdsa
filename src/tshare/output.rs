@@ -80,8 +80,12 @@ impl Output {
             .iter()
             .map(KeySharePublic::participant)
             .collect::<HashSet<_>>();
-        if pids.len() != public_coeffs.len() || pids.len() != public_keys.len() {
+        if pids.len() != public_keys.len() {
             error!("Tried to create a keygen output using a set of public material from non-unique participants");
+            Err(CallerError::BadInput)?
+        }
+        if pids.len() < public_coeffs.len() {
+            error!("Not enough participants to support the given polynomial");
             Err(CallerError::BadInput)?
         }
 

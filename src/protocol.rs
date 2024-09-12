@@ -333,6 +333,23 @@ pub(crate) mod participant_config {
             let id = ParticipantIdentifier::random(rng);
             Self { id, other_ids }
         }
+
+        /// Remove id from ParticipantConfig
+        pub fn remove(&self) -> Result<Vec<ParticipantConfig>> {
+            assert!(self.other_ids.len() > 1);
+            let other_ids = self.other_ids();
+            // for each element in other_ids, create a new ParticipantConfig
+            // with that element as the id
+            other_ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let mut others = other_ids.to_vec();
+                    let _removed = others.swap_remove(i);
+                    Self::new(*id, &others[..])
+                })
+                .collect::<Result<Vec<ParticipantConfig>>>()
+        }
     }
 
     #[cfg(test)]
@@ -833,6 +850,9 @@ mod tests {
         assert!(result.is_ok());
         let result = full_protocol_execution_with_noninteractive_signing_works(3, 2, 3);
         assert!(result.is_ok());
+        //let result =
+        // full_protocol_execution_with_noninteractive_signing_works(2, 2, 3);
+        // assert!(result.is_ok());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(
@@ -841,7 +861,7 @@ mod tests {
         n: usize,
     ) -> Result<()> {
         let mut rng = init_testing();
-        let _QUORUM_REAL = r; // TODO: only r participants are going to participate, but for now r = n
+        let QUORUM_REAL = r; // TODO: only r participants are going to participate, but for now r = n
         let QUORUM_THRESHOLD = t; // threshold t
         let QUORUM_SIZE = n; // total number of participants
                              // Set GLOBAL config for participants
@@ -1007,37 +1027,53 @@ mod tests {
             .public_key_shares()
             .to_vec();
 
+        // remove QUORUM_SIZE - QUORUM_REAL elements from the configs
+        let mut configs = configs.clone();
+        assert!(QUORUM_REAL > 1);
+        let total_to_remove = QUORUM_SIZE - QUORUM_REAL;
+        let mut removed = 0;
+        assert!(QUORUM_SIZE >= QUORUM_REAL);
+        while removed < total_to_remove {
+            configs = configs.clone().last().unwrap().remove().unwrap();
+            removed += 1;
+        }
+        assert!(configs.len() == QUORUM_REAL);
+
+        let all = configs.first().unwrap().all_participants();
+
         // t-out-of-t conversion
         // multiply private_key_tshare and all the public key shares by
         // lagrange_coefficients_at_zero, need to have the final quorum (with
         // more than t participants), then we collect all the private key
         // tshares together with the corresponding public key shares
-        // TODO this should be reorganized into different components and functions
+        // TODO: improve code quality
         let mut tshare_output_private_keys: HashMap<ParticipantIdentifier, KeySharePrivate> =
             HashMap::new();
         let mut tshare_output_public_keys: HashMap<ParticipantIdentifier, KeySharePublic> =
             HashMap::new();
         for pid in tshare_outputs.keys() {
-            let output = tshare_outputs.get(pid).unwrap();
-            let private_key = output.private_key_share();
-            let private_keyshare = KeySharePrivate::from_bigint(private_key);
-            assert!(tshare_output_private_keys
-                .insert(*pid, private_keyshare)
-                .is_none());
-            let public_key = CurvePoint::GENERATOR
-                .multiply_by_bignum(private_key)
-                .unwrap();
-            assert!(tshare_output_public_keys
-                .insert(*pid, KeySharePublic::new(*pid, public_key))
-                .is_none());
+            if all.contains(pid) {
+                let output = tshare_outputs.get(pid).unwrap();
+                let private_key = output.private_key_share();
+                let private_keyshare = KeySharePrivate::from_bigint(private_key);
+                assert!(tshare_output_private_keys
+                    .insert(*pid, private_keyshare)
+                    .is_none());
+                let public_key = CurvePoint::GENERATOR
+                    .multiply_by_bignum(private_key)
+                    .unwrap();
+                assert!(tshare_output_public_keys
+                    .insert(*pid, KeySharePublic::new(*pid, public_key))
+                    .is_none());
+            }
         }
         let toft_private_keys = TshareParticipant::convert_to_t_out_of_t_shares(
             tshare_output_private_keys,
-            configs[0].all_participants(),
+            all.clone(),
         )?;
         let toft_public_keys_dict = TshareParticipant::convert_public_shares_to_t_out_of_t_shares(
             tshare_output_public_keys,
-            configs[0].all_participants(),
+            all,
         )?;
         let toft_public_keys =
             TshareParticipant::get_all_public_keys(toft_public_keys_dict.clone());
@@ -1067,6 +1103,7 @@ mod tests {
             .iter()
             .map(|input| input.share().unwrap().x.clone())
             .fold(BigNumber::zero(), |acc, x| acc + x);
+
         // reduce mod the order
         sum_toft_private_shares %= k256_order();
         sum_tshare_input %= k256_order();

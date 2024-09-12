@@ -241,17 +241,6 @@ impl Broadcast for TshareParticipant {
 }
 
 impl TshareParticipant {
-    fn coeff_ids(&self) -> Vec<ParticipantIdentifier> {
-        // TODO: Introduce dedicated types.
-        //(0..self.input.threshold())
-        //    .map(|i| ParticipantIdentifier::from_u128(i as u128))
-        //    .collect()
-        // append self.id() and self.other_participant_ids.clone()
-        let mut coeff_ids = vec![self.id()];
-        coeff_ids.extend(self.other_participant_ids.clone());
-        coeff_ids
-    }
-
     /// Handle "Ready" messages from the protocol participants.
     ///
     /// Once "Ready" messages have been received from all participants, this
@@ -290,7 +279,7 @@ impl TshareParticipant {
             let mut privates = vec![];
             let mut publics = vec![];
 
-            for _pid in self.coeff_ids() {
+            for _ in 0..self.input.threshold() {
                 let (private, public) = CoeffPublic::new_pair(rng)?;
                 privates.push(private);
                 publics.push(public);
