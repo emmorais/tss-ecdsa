@@ -638,7 +638,7 @@ impl std::fmt::Display for Identifier {
 mod tests {
     use super::*;
     use crate::{
-        auxinfo::AuxInfoParticipant,
+        auxinfo::{self, AuxInfoParticipant, AuxInfoPublic},
         keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant},
         participant::Status,
         presign,
@@ -846,13 +846,9 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
-        let result = full_protocol_execution_with_noninteractive_signing_works(3, 3, 3);
-        assert!(result.is_ok());
-        let result = full_protocol_execution_with_noninteractive_signing_works(3, 2, 3);
-        assert!(result.is_ok());
-        //let result =
-        // full_protocol_execution_with_noninteractive_signing_works(2, 2, 3);
-        // assert!(result.is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 2, 3).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3).is_ok());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(
@@ -1073,7 +1069,7 @@ mod tests {
         )?;
         let toft_public_keys_dict = TshareParticipant::convert_public_shares_to_t_out_of_t_shares(
             tshare_output_public_keys,
-            all,
+            all.clone(),
         )?;
         let toft_public_keys =
             TshareParticipant::get_all_public_keys(toft_public_keys_dict.clone());
@@ -1118,14 +1114,17 @@ mod tests {
         for public_key_share in public_key_tshares.iter() {
             let all = configs[0].all_participants();
             let participant: ParticipantIdentifier = public_key_share.participant();
-            let lagrange_coefficients_at_zero =
-                TshareParticipant::lagrange_coefficient_at_zero(&participant, &all);
-            let point = public_key_share.as_ref();
-            let public_key_share = point.multiply_by_scalar(&lagrange_coefficients_at_zero);
-            assert_eq!(
-                public_key_share,
-                *toft_public_keys_dict.get(&participant).unwrap().as_ref()
-            );
+
+            if all.contains(&participant) {
+                let lagrange_coefficients_at_zero =
+                    TshareParticipant::lagrange_coefficient_at_zero(&participant, &all);
+                let point = public_key_share.as_ref();
+                let public_key_share = point.multiply_by_scalar(&lagrange_coefficients_at_zero);
+                assert_eq!(
+                    public_key_share,
+                    *toft_public_keys_dict.get(&participant).unwrap().as_ref()
+                );
+            }
         }
 
         let saved_public_key = toft_keygen_outputs
@@ -1135,7 +1134,25 @@ mod tests {
 
         // Set up presign participants
         // Clone auxinfo outputs for presigning
-        let mut auxinfo_outputs_presign = auxinfo_outputs_tshare.clone();
+        //let mut auxinfo_outputs_presign = auxinfo_outputs_tshare.clone();
+        let mut auxinfo_outputs_presign = HashMap::new();
+
+        // remove elements not in `all` from auxinfo_outputs_presign
+        for pid in auxinfo_outputs_tshare.keys() {
+            if all.contains(pid) {
+                let output = auxinfo_outputs_tshare.get(pid).unwrap();
+                let new_aux_pk: Vec<AuxInfoPublic> = output
+                    .public_auxinfo()
+                    .iter()
+                    .filter(|k| all.contains(&k.participant()))
+                    .cloned()
+                    .collect();
+                let new_output =
+                    auxinfo::Output::from_parts(new_aux_pk, output.private_auxinfo().clone())?;
+                assert!(auxinfo_outputs_presign.insert(*pid, new_output).is_none());
+            }
+        }
+
         let presign_sid = Identifier::random(&mut rng);
 
         // Prepare presign inputs: a pair of outputs from keygen and auxinfo.
@@ -1170,7 +1187,7 @@ mod tests {
             inbox.push(participant.initialize_message()?);
         }
 
-        while presign_outputs.len() < QUORUM_SIZE {
+        while presign_outputs.len() < QUORUM_REAL {
             let output = process_random_message(&mut presign_quorum, &mut inboxes, &mut rng)?;
 
             if let Some((pid, output)) = output {
@@ -1212,7 +1229,7 @@ mod tests {
         }
 
         // Run signing protocol
-        while sign_outputs.len() < QUORUM_SIZE {
+        while sign_outputs.len() < QUORUM_REAL {
             let output = process_random_message(&mut sign_quorum, &mut inboxes, &mut rng)?;
 
             if let Some((_pid, output)) = output {
