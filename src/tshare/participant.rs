@@ -17,7 +17,7 @@ use super::{
 use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
     errors::{CallerError, InternalError, Result},
-    keygen::{KeySharePrivate, KeySharePublic},
+    keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant},
     local_storage::LocalStorage,
     messages::{Message, MessageType, TshareMessageType},
     participant::{
@@ -664,48 +664,51 @@ impl TshareParticipant {
     /// Since the constant term is the secret, we need to multiply by the
     /// Lagrange coefficient at zero. This is done by the function
     /// `lagrange_coefficient_at_zero`.
+    /// Also convert the public tshares in the same way as the private shares.
+    /// Finally a vector of all public keys is returned.
+    #[allow(clippy::type_complexity)]
     pub fn convert_to_t_out_of_t_shares(
-        shares: HashMap<ParticipantIdentifier, KeySharePrivate>,
-        all: Vec<ParticipantIdentifier>,
-    ) -> Result<HashMap<ParticipantIdentifier, KeySharePrivate>> {
-        let mut new_shares = HashMap::new();
-        for (id, share) in shares.iter() {
-            let lagrange = Self::lagrange_coefficient_at_zero(id, &all);
-            let new_share: BigNumber =
-                share.clone().as_ref() * BigNumber::from_slice(lagrange.to_bytes());
-            assert!(new_shares
-                .insert(*id, KeySharePrivate::from_bigint(&new_share))
-                .is_none());
-        }
-        Ok(new_shares)
-    }
+        tshares: HashMap<ParticipantIdentifier, Output>,
+        all_participants: Vec<ParticipantIdentifier>,
+        rid: [u8; 32],
+    ) -> Result<(
+        HashMap<ParticipantIdentifier, <KeygenParticipant as ProtocolParticipant>::Output>,
+        Vec<KeySharePublic>,
+    )> {
+        let mut new_private_shares = HashMap::new();
+        let mut public_keys = vec![];
 
-    /// Get all the public keys from the shares.
-    pub fn get_all_public_keys(
-        shares: HashMap<ParticipantIdentifier, KeySharePublic>,
-    ) -> Vec<KeySharePublic> {
-        shares.values().cloned().collect()
-    }
-
-    /// Convert the public tshares in the same way as the private shares.
-    /// This is done by multiplying the public shares by the Lagrange
-    /// coefficients. Since the constant term is the secret, we need to
-    /// multiply by the Lagrange coefficient at zero. This is done by the
-    /// function `lagrange_coefficient_at_zero`. The public shares are
-    /// represented as EC points.
-    pub fn convert_public_shares_to_t_out_of_t_shares(
-        shares: HashMap<ParticipantIdentifier, KeySharePublic>,
-        all: Vec<ParticipantIdentifier>,
-    ) -> Result<HashMap<ParticipantIdentifier, KeySharePublic>> {
-        let mut new_shares = HashMap::new();
-        for (id, share) in shares.iter() {
-            let lagrange = Self::lagrange_coefficient_at_zero(id, &all);
-            let new_share = share.as_ref().multiply_by_scalar(&lagrange);
-            assert!(new_shares
-                .insert(*id, KeySharePublic::new(*id, new_share))
-                .is_none());
+        // Compute the new private shares and public keys.
+        for pid in tshares.keys() {
+            if all_participants.contains(pid) {
+                let output = tshares.get(pid).unwrap();
+                let private_key = output.private_key_share();
+                let private_share = KeySharePrivate::from_bigint(private_key);
+                let public_share = CurvePoint::GENERATOR
+                    .multiply_by_bignum(private_key)
+                    .unwrap();
+                let lagrange = Self::lagrange_coefficient_at_zero(pid, &all_participants);
+                let new_private_share: BigNumber =
+                    private_share.clone().as_ref() * BigNumber::from_slice(lagrange.to_bytes());
+                let new_public_share = public_share.as_ref().multiply_by_scalar(&lagrange);
+                assert!(new_private_shares
+                    .insert(*pid, KeySharePrivate::from_bigint(&new_private_share))
+                    .is_none());
+                public_keys.push(KeySharePublic::new(*pid, new_public_share));
+            }
         }
-        Ok(new_shares)
+
+        // Compute the new outputs
+        let mut keygen_outputs: HashMap<
+            ParticipantIdentifier,
+            <KeygenParticipant as ProtocolParticipant>::Output,
+        > = HashMap::new();
+        for (pid, private_key_share) in new_private_shares {
+            let output =
+                crate::keygen::Output::from_parts(public_keys.clone(), private_key_share, rid)?;
+            assert!(keygen_outputs.insert(pid, output).is_none());
+        }
+        Ok((keygen_outputs, public_keys))
     }
 
     /// Reconstruct the secret from the shares.

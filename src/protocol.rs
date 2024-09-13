@@ -639,7 +639,7 @@ mod tests {
     use super::*;
     use crate::{
         auxinfo::{self, AuxInfoParticipant, AuxInfoPublic},
-        keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant},
+        keygen::KeygenParticipant,
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
@@ -848,8 +848,8 @@ mod tests {
     fn test_full_protocol_execution_with_noninteractive_signing_works_larger_values() {
         assert!(full_protocol_execution_with_noninteractive_signing_works(5, 5, 5).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(5, 4, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 3, 5).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(4, 4, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 3, 5).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(4, 3, 5).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 5).is_ok());
     }
@@ -875,11 +875,12 @@ mod tests {
         n: usize,
     ) -> Result<()> {
         let mut rng = init_testing();
-        let QUORUM_REAL = r; // TODO: only r participants are going to participate, but for now r = n
+        let QUORUM_REAL = r;
         let QUORUM_THRESHOLD = t; // threshold t
         let QUORUM_SIZE = n; // total number of participants
-                             // Set GLOBAL config for participants
-        let configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng).unwrap();
+
+        // Set GLOBAL config for participants
+        let mut configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng).unwrap();
 
         // Set up auxinfo participants
         let auxinfo_sid = Identifier::random(&mut rng);
@@ -1034,117 +1035,41 @@ mod tests {
             .iter()
             .all(|p| *p.status() == Status::TerminatedSuccessfully));
 
-        // Save the public key and key shares for later
-        let public_key_tshares = tshare_outputs
-            .get(&configs.first().unwrap().id())
-            .unwrap()
-            .public_key_shares()
-            .to_vec();
-
-        // remove QUORUM_SIZE - QUORUM_REAL elements from the configs
-        let mut configs = configs.clone();
+        // remove QUORUM_SIZE - QUORUM_REAL elements from the configs (the last ones)
         assert!(QUORUM_REAL > 1);
-        let total_to_remove = QUORUM_SIZE - QUORUM_REAL;
-        let mut removed = 0;
         assert!(QUORUM_SIZE >= QUORUM_REAL);
-        while removed < total_to_remove {
+        for _ in 0..(QUORUM_SIZE - QUORUM_REAL) {
             configs = configs.clone().last().unwrap().remove().unwrap();
-            removed += 1;
         }
         assert!(configs.len() == QUORUM_REAL);
 
-        let all = configs.first().unwrap().all_participants();
+        let all_participants = configs.first().unwrap().all_participants();
 
         // t-out-of-t conversion
-        // multiply private_key_tshare and all the public key shares by
-        // lagrange_coefficients_at_zero, need to have the final quorum (with
-        // more than t participants), then we collect all the private key
-        // tshares together with the corresponding public key shares
-        // TODO: improve code quality
-        let mut tshare_output_private_keys: HashMap<ParticipantIdentifier, KeySharePrivate> =
-            HashMap::new();
-        let mut tshare_output_public_keys: HashMap<ParticipantIdentifier, KeySharePublic> =
-            HashMap::new();
-        for pid in tshare_outputs.keys() {
-            if all.contains(pid) {
-                let output = tshare_outputs.get(pid).unwrap();
-                let private_key = output.private_key_share();
-                let private_keyshare = KeySharePrivate::from_bigint(private_key);
-                assert!(tshare_output_private_keys
-                    .insert(*pid, private_keyshare)
-                    .is_none());
-                let public_key = CurvePoint::GENERATOR
-                    .multiply_by_bignum(private_key)
-                    .unwrap();
-                assert!(tshare_output_public_keys
-                    .insert(*pid, KeySharePublic::new(*pid, public_key))
-                    .is_none());
-            }
-        }
-        let toft_private_keys = TshareParticipant::convert_to_t_out_of_t_shares(
-            tshare_output_private_keys,
-            all.clone(),
-        )?;
-        let toft_public_keys_dict = TshareParticipant::convert_public_shares_to_t_out_of_t_shares(
-            tshare_output_public_keys,
-            all.clone(),
-        )?;
-        let toft_public_keys =
-            TshareParticipant::get_all_public_keys(toft_public_keys_dict.clone());
-
-        // Use these key pairs to proceed with the signing protocol, replace the
-        // keygen_outputs with the t-out-of-t key pair for each id
-        let mut toft_keygen_outputs: HashMap<
-            ParticipantIdentifier,
-            <KeygenParticipant as ProtocolParticipant>::Output,
-        > = HashMap::new();
-        // get rid from first output
         let rid = keygen_outputs[&configs[0].id()].rid();
-        let mut sum_toft_private_shares = BigNumber::zero();
-        for (pid, private_key_share) in toft_private_keys {
-            sum_toft_private_shares += private_key_share.as_ref().clone();
-            let output = crate::keygen::Output::from_parts(
-                toft_public_keys.clone(),
-                private_key_share,
+        let (mut toft_keygen_outputs, toft_public_keys) =
+            TshareParticipant::convert_to_t_out_of_t_shares(
+                tshare_outputs,
+                all_participants.clone(),
                 *rid,
             )?;
-            assert!(toft_keygen_outputs.insert(pid, output).is_none());
-        }
 
-        // Check the sum is indeed the sum of original private keys used as input of
-        // tshare
-        let mut sum_tshare_input = tshare_inputs
-            .iter()
-            .map(|input| input.share().unwrap().x.clone())
-            .fold(BigNumber::zero(), |acc, x| acc + x);
-
-        // reduce mod the order
-        sum_toft_private_shares %= k256_order();
-        sum_tshare_input %= k256_order();
         if QUORUM_REAL >= QUORUM_THRESHOLD {
+            let mut sum_toft_private_shares = toft_keygen_outputs
+                .values()
+                .map(|output| output.private_key_share().as_ref().clone())
+                .fold(BigNumber::zero(), |acc, x| acc + x);
+
+            // Check the sum is indeed the sum of original private keys used as input of
+            // tshare
+            let mut sum_tshare_input = tshare_inputs
+                .iter()
+                .map(|input| input.share().unwrap().x.clone())
+                .fold(BigNumber::zero(), |acc, x| acc + x);
+            // reduce mod the order
+            sum_toft_private_shares %= k256_order();
+            sum_tshare_input %= k256_order();
             assert_eq!(sum_toft_private_shares, sum_tshare_input);
-        }
-
-        // Validate the public key shares
-        // if we multiply each public key share with the corresponding lagrange
-        // coefficient at zero, we should get the same public key as obtained
-        // from the toft private key shares (as above) so for each element in
-        // public_key_tshares, multiply it with the corresponding lagrange coefficient
-        // at zero
-        for public_key_share in public_key_tshares.iter() {
-            let all = configs[0].all_participants();
-            let participant: ParticipantIdentifier = public_key_share.participant();
-
-            if all.contains(&participant) {
-                let lagrange_coefficients_at_zero =
-                    TshareParticipant::lagrange_coefficient_at_zero(&participant, &all);
-                let point = public_key_share.as_ref();
-                let public_key_share = point.multiply_by_scalar(&lagrange_coefficients_at_zero);
-                assert_eq!(
-                    public_key_share,
-                    *toft_public_keys_dict.get(&participant).unwrap().as_ref()
-                );
-            }
         }
 
         let saved_public_key = toft_keygen_outputs
@@ -1159,12 +1084,12 @@ mod tests {
 
         // remove elements not in `all` from auxinfo_outputs_presign
         for pid in auxinfo_outputs_tshare.keys() {
-            if all.contains(pid) {
+            if all_participants.contains(pid) {
                 let output = auxinfo_outputs_tshare.get(pid).unwrap();
                 let new_aux_pk: Vec<AuxInfoPublic> = output
                     .public_auxinfo()
                     .iter()
-                    .filter(|k| all.contains(&k.participant()))
+                    .filter(|k| all_participants.contains(&k.participant()))
                     .cloned()
                     .collect();
                 let new_output =
