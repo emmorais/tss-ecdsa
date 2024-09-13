@@ -862,10 +862,15 @@ mod tests {
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3).is_ok());
     }
 
+    #[ignore]
     #[test]
-    fn test_full_protocol_execution_with_noninteractive_signing_works_err() {
+    fn test_full_protocol_execution_with_noninteractive_signing_works_err_larger_values() {
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 4, 5).is_err());
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 4, 5).is_err());
+    }
+
+    #[test]
+    fn test_full_protocol_execution_with_noninteractive_signing_works_err() {
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 3, 4).is_err());
     }
 

@@ -8,10 +8,8 @@
 
 use crate::{
     errors::{CallerError, InternalError, Result},
-    keygen::{KeySharePrivate, KeySharePublic},
     paillier::{Ciphertext, DecryptionKey, EncryptionKey},
     utils::{k256_order, CurvePoint},
-    ParticipantIdentifier,
 };
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
@@ -70,14 +68,10 @@ pub struct CoeffPrivate {
 
 impl Debug for CoeffPrivate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO: revert this change
-        //f.write_str("CoeffPrivate([redacted])")
-        // print the actual value for debugging purposes
-        f.debug_tuple("CoeffPrivate").field(&self.x).finish()
+        f.write_str("CoeffPrivate([redacted])")
     }
 }
 
-// TODO: remove unused methods.
 impl CoeffPrivate {
     /// Sample a private key share uniformly at random.
     pub(crate) fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
@@ -91,14 +85,6 @@ impl CoeffPrivate {
             .fold(BigNumber::zero(), |sum, o| sum + o.x.clone())
             .nmod(&k256_order());
         CoeffPrivate { x: sum }
-    }
-
-    // TODO: Introduce a dedicated Output for tshare,
-    // implement tshare::Output::public_key(),
-    // and remove this conversion.
-    /// Convert a CoeffPrivate to a KeySharePrivate.
-    pub fn to_keyshare(&self) -> KeySharePrivate {
-        KeySharePrivate::from_bigint(&self.x)
     }
 
     /// Computes the "raw" curve point corresponding to this private key.
@@ -118,7 +104,6 @@ impl AsRef<BigNumber> for CoeffPrivate {
     }
 }
 
-// TODO: remove unused methods.
 /// A curve point representing a given [`Participant`](crate::Participant)'s
 /// public key.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,12 +124,6 @@ impl CoeffPublic {
         let private_share = CoeffPrivate::random(rng);
         let public_share = private_share.to_public()?;
         Ok((private_share, public_share))
-    }
-
-    // TODO: Introduce a dedicated Output for tshare, and remove this conversion.
-    /// Convert a CoeffPublic to a KeySharePublic.
-    pub fn to_keyshare(&self, i: usize) -> KeySharePublic {
-        KeySharePublic::new(ParticipantIdentifier::from_u128(i as u128), self.X)
     }
 }
 
@@ -169,6 +148,7 @@ mod tests {
     use crate::{
         auxinfo,
         utils::{k256_order, testing::init_testing},
+        ParticipantIdentifier,
     };
     use rand::rngs::StdRng;
 
