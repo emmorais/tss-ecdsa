@@ -843,12 +843,30 @@ mod tests {
         inboxes.iter().all(|(_pid, messages)| messages.is_empty())
     }
 
+    #[ignore]
+    #[test]
+    fn test_full_protocol_execution_with_noninteractive_signing_works_larger_values() {
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 5, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 4, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 3, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 4, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 3, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 5).is_ok());
+    }
+
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 2, 3).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3).is_ok());
+    }
+
+    #[test]
+    fn test_full_protocol_execution_with_noninteractive_signing_works_err() {
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 4, 5).is_err());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 4, 5).is_err());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 3, 4).is_err());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(
@@ -1103,7 +1121,9 @@ mod tests {
         // reduce mod the order
         sum_toft_private_shares %= k256_order();
         sum_tshare_input %= k256_order();
-        assert_eq!(sum_toft_private_shares, sum_tshare_input);
+        if QUORUM_REAL >= QUORUM_THRESHOLD {
+            assert_eq!(sum_toft_private_shares, sum_tshare_input);
+        }
 
         // Validate the public key shares
         // if we multiply each public key share with the corresponding lagrange
