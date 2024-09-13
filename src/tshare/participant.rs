@@ -625,10 +625,7 @@ impl TshareParticipant {
         coeff_privates: &[CoeffPrivate],
         recipient_id: ParticipantIdentifier,
     ) -> EvalPrivate {
-        // TODO: Enforce that no participant ID equals the shared evaluation point
-        // (0, constant term).
         // TODO: Use a field type.
-
         let x = Self::participant_coordinate(recipient_id);
         assert!(x > BigNumber::zero());
         let mut sum = BigNumber::zero();
@@ -636,7 +633,6 @@ impl TshareParticipant {
             sum *= &x;
             sum = sum.modadd(&coeff.x, &k256_order());
         }
-        // TODO: introduce a different type for evaluations.
         EvalPrivate { x: sum }
     }
 
