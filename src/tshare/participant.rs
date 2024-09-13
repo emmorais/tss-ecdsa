@@ -630,6 +630,7 @@ impl TshareParticipant {
         // TODO: Use a field type.
 
         let x = Self::participant_coordinate(recipient_id);
+        assert!(x > BigNumber::zero());
         let mut sum = BigNumber::zero();
         for coeff in coeff_privates.iter().rev() {
             sum *= &x;
