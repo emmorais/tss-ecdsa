@@ -26,7 +26,7 @@ pub struct EvalEncrypted {
 
 impl EvalEncrypted {
     pub fn encrypt<R: RngCore + CryptoRng>(
-        share_private: &CoeffPrivate,
+        share_private: &EvalPrivate,
         pk: &EncryptionKey,
         rng: &mut R,
     ) -> Result<Self> {
@@ -42,7 +42,7 @@ impl EvalEncrypted {
         Ok(EvalEncrypted { ciphertext })
     }
 
-    pub fn decrypt(&self, dk: &DecryptionKey) -> Result<CoeffPrivate> {
+    pub fn decrypt(&self, dk: &DecryptionKey) -> Result<EvalPrivate> {
         let x = dk.decrypt(&self.ciphertext).map_err(|_| {
             error!("EvalEncrypted decryption failed, ciphertext out of range",);
             CallerError::DeserializationFailed
@@ -54,7 +54,7 @@ impl EvalEncrypted {
             );
             Err(CallerError::DeserializationFailed)?;
         }
-        Ok(CoeffPrivate { x })
+        Ok(EvalPrivate { x })
     }
 }
 
@@ -64,6 +64,19 @@ pub struct CoeffPrivate {
     /// A BigNumber element in the range [1, q) representing a polynomial
     /// coefficient
     pub x: BigNumber,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvalPrivate {
+    /// A BigNumber element in the range [1, q) representing a polynomial
+    /// coefficient
+    pub x: BigNumber,
+}
+
+impl EvalPrivate {
+    pub fn new(x: BigNumber) -> Self {
+        EvalPrivate { x }
+    }
 }
 
 impl Debug for CoeffPrivate {
@@ -79,14 +92,6 @@ impl CoeffPrivate {
         CoeffPrivate { x: random_bn }
     }
 
-    pub(crate) fn sum(shares: &[Self]) -> Self {
-        let sum = shares
-            .iter()
-            .fold(BigNumber::zero(), |sum, o| sum + o.x.clone())
-            .nmod(&k256_order());
-        CoeffPrivate { x: sum }
-    }
-
     /// Computes the "raw" curve point corresponding to this private key.
     pub(crate) fn public_point(&self) -> Result<CurvePoint> {
         CurvePoint::GENERATOR.multiply_by_bignum(&self.x)
@@ -94,6 +99,26 @@ impl CoeffPrivate {
 
     pub(crate) fn to_public(&self) -> Result<CoeffPublic> {
         Ok(CoeffPublic::new(self.public_point()?))
+    }
+}
+
+impl EvalPrivate {
+    /// Sample a private key share uniformly at random.
+    pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
+        let random_bn = BigNumber::from_rng(&k256_order(), rng);
+        EvalPrivate { x: random_bn }
+    }
+
+    pub(crate) fn sum(shares: &[Self]) -> Self {
+        let sum = shares
+            .iter()
+            .fold(BigNumber::zero(), |sum, o| sum + o.x.clone())
+            .nmod(&k256_order());
+        EvalPrivate { x: sum }
+    }
+
+    pub(crate) fn public_point(&self) -> Result<CurvePoint> {
+        CurvePoint::GENERATOR.multiply_by_bignum(&self.x)
     }
 }
 
@@ -108,6 +133,13 @@ impl AsRef<BigNumber> for CoeffPrivate {
 /// public key.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoeffPublic {
+    X: CurvePoint,
+}
+
+/// A curve point representing a given [`Participant`](crate::Participant)'s
+/// public evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvalPublic {
     X: CurvePoint,
 }
 
@@ -172,7 +204,7 @@ mod tests {
         let rng = &mut rng;
 
         // Encryption round-trip.
-        let coeff = CoeffPrivate::random(rng);
+        let coeff = EvalPrivate::random(rng);
         let encrypted = EvalEncrypted::encrypt(&coeff, &pk, rng).expect("encryption failed");
         let decrypted = encrypted.decrypt(&dk).expect("decryption failed");
 
@@ -186,7 +218,7 @@ mod tests {
 
         // Encrypt invalid shares.
         for x in [BigNumber::zero(), -BigNumber::one(), k256_order()].iter() {
-            let share = CoeffPrivate { x: x.clone() };
+            let share = EvalPrivate { x: x.clone() };
             let encrypted = EvalEncrypted::encrypt(&share, &pk, rng).expect("encryption failed");
             // Decryption reports an error.
             let decrypt_result = encrypted.decrypt(&dk);

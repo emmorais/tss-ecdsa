@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use super::{
     commit::{TshareCommit, TshareDecommit},
-    share::{CoeffPrivate, CoeffPublic, EvalEncrypted},
+    share::{CoeffPrivate, CoeffPublic, EvalEncrypted, EvalPrivate},
 };
 use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
@@ -68,7 +68,7 @@ mod storage {
     }
     pub(super) struct ValidPrivateEval;
     impl TypeTag for ValidPrivateEval {
-        type Value = super::CoeffPrivate;
+        type Value = super::EvalPrivate;
     }
 }
 
@@ -624,7 +624,7 @@ impl TshareParticipant {
     pub fn eval_private_share(
         coeff_privates: &[CoeffPrivate],
         recipient_id: ParticipantIdentifier,
-    ) -> CoeffPrivate {
+    ) -> EvalPrivate {
         // TODO: Enforce that no participant ID equals the shared evaluation point
         // (0, constant term).
         // TODO: Use a field type.
@@ -637,7 +637,7 @@ impl TshareParticipant {
             sum = sum.modadd(&coeff.x, &k256_order());
         }
         // TODO: introduce a different type for evaluations.
-        CoeffPrivate { x: sum }
+        EvalPrivate { x: sum }
     }
 
     /// Evaluate the private share at the point 0.
@@ -945,8 +945,8 @@ impl TshareParticipant {
         }
     }
 
-    fn aggregate_private_shares(private_shares: &[CoeffPrivate]) -> CoeffPrivate {
-        CoeffPrivate::sum(private_shares)
+    fn aggregate_private_shares(private_shares: &[EvalPrivate]) -> EvalPrivate {
+        EvalPrivate::sum(private_shares)
     }
 
     /// Return coeffs.sum(axis=0)
