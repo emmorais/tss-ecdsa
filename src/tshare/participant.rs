@@ -903,21 +903,10 @@ impl TshareParticipant {
             }
             all_public_keys.push(KeySharePublic::new(self.id(), implied_public));
 
-            let all_public_coeffs_clone = all_public_coeffs.clone();
-            // Return the output and stop.
-
-            // Since we need the public coeffs laters, we include it together with public
-            // shares
-            let output = Output::from_parts(
-                all_public_coeffs_clone.clone(),
-                all_public_keys,
-                my_private_share.x.clone(),
-            )?;
-
             // Check that doing the aggregation of constant terms in a different order
             // results in the same result
             let old_public = Self::aggregate_constant_terms(&coeffs_from_all);
-            if old_public != all_public_coeffs_clone[0] {
+            if old_public != all_public_coeffs[0] {
                 error!("The new public key share has inconsistent constant term.");
                 return Err(InternalError::ProtocolError(None));
             };
@@ -932,6 +921,12 @@ impl TshareParticipant {
                     return Err(InternalError::ProtocolError(None));
                 }
             }
+
+            let output = Output::from_parts(
+                all_public_coeffs.clone(),
+                all_public_keys,
+                my_private_share.x.clone(),
+            )?;
 
             self.status = Status::TerminatedSuccessfully;
             Ok(ProcessOutcome::Terminated(output))
