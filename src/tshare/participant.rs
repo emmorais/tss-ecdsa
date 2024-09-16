@@ -625,7 +625,6 @@ impl TshareParticipant {
         coeff_privates: &[CoeffPrivate],
         recipient_id: ParticipantIdentifier,
     ) -> EvalPrivate {
-        // TODO: Use a field type.
         let x = Self::participant_coordinate(recipient_id);
         assert!(x > Scalar::ZERO);
         let mut sum = Scalar::ZERO;
@@ -680,9 +679,8 @@ impl TshareParticipant {
             if all_participants.contains(pid) {
                 let output = tshares.get(pid).unwrap();
                 let private_key = output.private_key_share();
-                // TODO: cretae a method to convert from scalar to bn.
                 let private_share =
-                    KeySharePrivate::from_bigint(&BigNumber::from_slice(private_key.to_bytes()));
+                    KeySharePrivate::from_bigint(&scalar_to_bn(private_key));
                 let public_share = CurvePoint::GENERATOR.multiply_by_scalar(private_key);
                 let lagrange = Self::lagrange_coefficient_at_zero(pid, &all_participants);
                 let new_private_share: BigNumber =
@@ -777,7 +775,6 @@ impl TshareParticipant {
             .retrieve::<storage::Decommit>(message.from())?;
 
         // Check that there is one proof per coeff.
-        // TODO: check (or compute) the exact value of the eval points.
         if proofs.len() != decom.coeff_publics.len() {
             error!("Received incorrect number of proofs",);
             return Err(InternalError::ProtocolError(Some(message.from())));
