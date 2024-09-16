@@ -9,8 +9,9 @@
 use crate::{
     errors::{CallerError, InternalError, Result},
     paillier::{Ciphertext, DecryptionKey, EncryptionKey},
-    utils::{k256_order, CurvePoint},
+    utils::{bn_to_scalar, k256_order, scalar_to_bn, CurvePoint},
 };
+use k256::{elliptic_curve::Field, Scalar};
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,7 @@ impl EvalEncrypted {
         }
 
         let (ciphertext, _nonce) = pk
-            .encrypt(rng, &share_private.x)
+            .encrypt(rng, &scalar_to_bn(&share_private.x))
             .map_err(|_| InternalError::InternalInvariantFailed)?;
 
         Ok(EvalEncrypted { ciphertext })
@@ -54,7 +55,9 @@ impl EvalEncrypted {
             );
             Err(CallerError::DeserializationFailed)?;
         }
-        Ok(EvalPrivate { x })
+        Ok(EvalPrivate {
+            x: bn_to_scalar(&x).unwrap(),
+        })
     }
 }
 
@@ -63,18 +66,18 @@ impl EvalEncrypted {
 pub struct CoeffPrivate {
     /// A BigNumber element in the range [1, q) representing a polynomial
     /// coefficient
-    pub x: BigNumber,
+    pub x: Scalar,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvalPrivate {
     /// A BigNumber element in the range [1, q) representing a polynomial
     /// coefficient
-    pub x: BigNumber,
+    pub x: Scalar,
 }
 
 impl EvalPrivate {
-    pub fn new(x: BigNumber) -> Self {
+    pub fn new(x: Scalar) -> Self {
         EvalPrivate { x }
     }
 }
@@ -88,43 +91,40 @@ impl Debug for CoeffPrivate {
 impl CoeffPrivate {
     /// Sample a private key share uniformly at random.
     pub(crate) fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let random_bn = BigNumber::from_rng(&k256_order(), rng);
+        let random_bn = Scalar::random(rng);
         CoeffPrivate { x: random_bn }
     }
 
     /// Computes the "raw" curve point corresponding to this private key.
-    pub(crate) fn public_point(&self) -> Result<CurvePoint> {
-        CurvePoint::GENERATOR.multiply_by_bignum(&self.x)
+    pub(crate) fn public_point(&self) -> CurvePoint {
+        CurvePoint::GENERATOR.multiply_by_scalar(&self.x)
     }
 
-    pub(crate) fn to_public(&self) -> Result<CoeffPublic> {
-        Ok(CoeffPublic::new(self.public_point()?))
+    pub(crate) fn to_public(&self) -> CoeffPublic {
+        CoeffPublic::new(self.public_point())
     }
 }
 
 impl EvalPrivate {
     /// Sample a private key share uniformly at random.
     pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let random_bn = BigNumber::from_rng(&k256_order(), rng);
-        EvalPrivate { x: random_bn }
+        let random_scalar = Scalar::random(rng);
+        EvalPrivate { x: random_scalar }
     }
 
     pub(crate) fn sum(shares: &[Self]) -> Self {
-        let sum = shares
-            .iter()
-            .fold(BigNumber::zero(), |sum, o| sum + o.x.clone())
-            .nmod(&k256_order());
+        let sum = shares.iter().fold(Scalar::ZERO, |sum, o| sum + o.x);
         EvalPrivate { x: sum }
     }
 
-    pub(crate) fn public_point(&self) -> Result<CurvePoint> {
-        CurvePoint::GENERATOR.multiply_by_bignum(&self.x)
+    pub(crate) fn public_point(&self) -> CurvePoint {
+        CurvePoint::GENERATOR.multiply_by_scalar(&self.x)
     }
 }
 
-impl AsRef<BigNumber> for CoeffPrivate {
+impl AsRef<Scalar> for CoeffPrivate {
     /// Get the coeff as a number.
-    fn as_ref(&self) -> &BigNumber {
+    fn as_ref(&self) -> &Scalar {
         &self.x
     }
 }
@@ -154,7 +154,7 @@ impl CoeffPublic {
         rng: &mut R,
     ) -> Result<(CoeffPrivate, CoeffPublic)> {
         let private_share = CoeffPrivate::random(rng);
-        let public_share = private_share.to_public()?;
+        let public_share = private_share.to_public();
         Ok((private_share, public_share))
     }
 }
@@ -179,7 +179,7 @@ mod tests {
     use super::*;
     use crate::{
         auxinfo,
-        utils::{k256_order, testing::init_testing},
+        utils::{bn_to_scalar, k256_order, testing::init_testing},
         ParticipantIdentifier,
     };
     use rand::rngs::StdRng;
@@ -212,13 +212,26 @@ mod tests {
     }
 
     #[test]
-    fn coeff_decrypt_out_of_range() {
+    fn coeff_decrypt_unexpected() {
         let (mut rng, pk, dk) = setup();
         let rng = &mut rng;
 
-        // Encrypt invalid shares.
-        for x in [BigNumber::zero(), -BigNumber::one(), k256_order()].iter() {
-            let share = EvalPrivate { x: x.clone() };
+        // Encrypt unexpected shares.
+        {
+            let x = &(-BigNumber::one());
+            let share = EvalPrivate {
+                x: bn_to_scalar(x).expect("Failed to convert to scalar"),
+            };
+            let encrypted = EvalEncrypted::encrypt(&share, &pk, rng).expect("encryption failed");
+            // Decryption reports an error.
+            let decrypt_result = encrypted.decrypt(&dk);
+            assert!(decrypt_result.is_ok());
+        }
+        // Encrypt zero returns an error in decryption.
+        for x in [BigNumber::zero(), k256_order()].iter() {
+            let share = EvalPrivate {
+                x: bn_to_scalar(x).expect("Failed to convert to scalar"),
+            };
             let encrypted = EvalEncrypted::encrypt(&share, &pk, rng).expect("encryption failed");
             // Decryption reports an error.
             let decrypt_result = encrypted.decrypt(&dk);

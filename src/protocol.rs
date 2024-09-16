@@ -644,10 +644,10 @@ mod tests {
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
         tshare::{self, CoeffPrivate, TshareParticipant},
-        utils::testing::init_testing,
+        utils::{bn_to_scalar, testing::init_testing},
         PresignParticipant,
     };
-    use k256::ecdsa::signature::DigestVerifier;
+    use k256::{ecdsa::signature::DigestVerifier, Scalar};
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
     use std::{collections::HashMap, vec};
@@ -987,11 +987,12 @@ mod tests {
             })
             .map(|(auxinfo_output, keygen_output)| {
                 // convert the private share to CoeffPrivate
-                let secret =
-                    BigNumber::from_slice(keygen_output.private_key_share().clone().into_bytes());
+                let secret = keygen_output.private_key_share().as_ref();
                 tshare::Input::new(
                     auxinfo_output,
-                    Some(CoeffPrivate { x: secret }),
+                    Some(CoeffPrivate {
+                        x: bn_to_scalar(secret).unwrap(),
+                    }),
                     QUORUM_THRESHOLD,
                 )
                 .unwrap()
@@ -1067,14 +1068,16 @@ mod tests {
 
             // Check the sum is indeed the sum of original private keys used as input of
             // tshare
-            let mut sum_tshare_input = tshare_inputs
+            let sum_tshare_input = tshare_inputs
                 .iter()
-                .map(|input| input.share().unwrap().x.clone())
-                .fold(BigNumber::zero(), |acc, x| acc + x);
+                .map(|input| input.share().unwrap().x)
+                .fold(Scalar::ZERO, |acc, x| acc + x);
             // reduce mod the order
             sum_toft_private_shares %= k256_order();
-            sum_tshare_input %= k256_order();
-            assert_eq!(sum_toft_private_shares, sum_tshare_input);
+            assert_eq!(
+                bn_to_scalar(&sum_toft_private_shares).unwrap(),
+                sum_tshare_input
+            );
         }
 
         let saved_public_key = toft_keygen_outputs

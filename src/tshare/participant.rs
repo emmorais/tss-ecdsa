@@ -25,12 +25,12 @@ use crate::{
     },
     protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once,
-    utils::{bn_to_scalar, k256_order, CurvePoint},
+    utils::{bn_to_scalar, scalar_to_bn, CurvePoint},
     zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
     Identifier, ParticipantConfig,
 };
 
-use k256::Scalar;
+use k256::{elliptic_curve::PrimeField, Scalar};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -287,7 +287,7 @@ impl TshareParticipant {
 
             if let Some(private) = self.input.share() {
                 privates[0] = private.clone();
-                publics[0] = private.to_public()?;
+                publics[0] = private.to_public();
             }
 
             (privates, publics)
@@ -570,7 +570,7 @@ impl TshareParticipant {
                 &self.retrieve_context(),
                 precom,
                 &input,
-                &ProverSecret::new(sk.as_ref()),
+                &ProverSecret::new(&scalar_to_bn(sk.as_ref())),
                 &transcript,
             )?;
 
@@ -616,8 +616,8 @@ impl TshareParticipant {
     }
 
     /// Assign a non-null x coordinate to each participant.
-    fn participant_coordinate(pid: ParticipantIdentifier) -> BigNumber {
-        BigNumber::from(pid.as_u128()) + BigNumber::one()
+    fn participant_coordinate(pid: ParticipantIdentifier) -> Scalar {
+        Scalar::from_u128(pid.as_u128()) + Scalar::ONE
     }
 
     /// Evaluate the private share
@@ -627,18 +627,18 @@ impl TshareParticipant {
     ) -> EvalPrivate {
         // TODO: Use a field type.
         let x = Self::participant_coordinate(recipient_id);
-        assert!(x > BigNumber::zero());
-        let mut sum = BigNumber::zero();
+        assert!(x > Scalar::ZERO);
+        let mut sum = Scalar::ZERO;
         for coeff in coeff_privates.iter().rev() {
             sum *= &x;
-            sum = sum.modadd(&coeff.x, &k256_order());
+            sum += &coeff.x;
         }
         EvalPrivate { x: sum }
     }
 
     /// Evaluate the private share at the point 0.
-    fn eval_private_share_at_zero(coeff_privates: &[CoeffPrivate]) -> BigNumber {
-        coeff_privates[0].x.clone()
+    fn eval_private_share_at_zero(coeff_privates: &[CoeffPrivate]) -> Scalar {
+        coeff_privates[0].x
     }
 
     /// Feldman VSS evaluation of the public share.
@@ -650,7 +650,7 @@ impl TshareParticipant {
         let x = Self::participant_coordinate(recipient_id);
         let mut sum = CurvePoint::IDENTITY;
         for coeff in coeff_publics.iter().rev() {
-            sum = sum.multiply_by_bignum(&x)?;
+            sum = sum.multiply_by_scalar(&x);
             sum = sum + *coeff.as_ref();
         }
         Ok(sum)
@@ -680,10 +680,10 @@ impl TshareParticipant {
             if all_participants.contains(pid) {
                 let output = tshares.get(pid).unwrap();
                 let private_key = output.private_key_share();
-                let private_share = KeySharePrivate::from_bigint(private_key);
-                let public_share = CurvePoint::GENERATOR
-                    .multiply_by_bignum(private_key)
-                    .unwrap();
+                // TODO: cretae a method to convert from scalar to bn.
+                let private_share =
+                    KeySharePrivate::from_bigint(&BigNumber::from_slice(private_key.to_bytes()));
+                let public_share = CurvePoint::GENERATOR.multiply_by_scalar(private_key);
                 let lagrange = Self::lagrange_coefficient_at_zero(pid, &all_participants);
                 let new_private_share: BigNumber =
                     private_share.clone().as_ref() * BigNumber::from_slice(lagrange.to_bytes());
@@ -733,9 +733,8 @@ impl TshareParticipant {
         let mut result = Scalar::ONE;
         for point in other_points {
             if point != my_point {
-                let point_coordinate = bn_to_scalar(&Self::participant_coordinate(*point)).unwrap();
-                let my_point_coordinate =
-                    bn_to_scalar(&Self::participant_coordinate(*my_point)).unwrap();
+                let point_coordinate = &Self::participant_coordinate(*point);
+                let my_point_coordinate = &Self::participant_coordinate(*my_point);
                 let numerator = Scalar::ZERO - point_coordinate;
                 let denominator = my_point_coordinate - point_coordinate;
                 let inv = denominator.invert().unwrap();
@@ -841,7 +840,7 @@ impl TshareParticipant {
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
         let expected_public = Self::eval_public_share(&decom.coeff_publics, self.id())?;
-        let implied_public = private_share.public_point()?;
+        let implied_public = private_share.public_point();
         if implied_public != expected_public {
             error!("the private share does not match the public share");
             return Err(InternalError::ProtocolError(Some(message.from())));
@@ -889,7 +888,7 @@ impl TshareParticipant {
             // Double-check that the aggregated private share matches the aggregated public
             // coeffs.
             let expected_public = Self::eval_public_share(&all_public_coeffs, self.id())?;
-            let implied_public = my_private_share.public_point()?;
+            let implied_public = my_private_share.public_point();
             if implied_public != expected_public {
                 error!("The aggregated private share does not match the public coeffs (Feldman)");
                 return Err(InternalError::ProtocolError(None));
@@ -914,7 +913,7 @@ impl TshareParticipant {
             // Check if the share is consistent, it must have an old public key that
             // corresponds to the its input share
             if let Some(share) = self.input.share() {
-                let old_public_key = share.public_point()?;
+                let old_public_key = share.public_point();
                 let last = coeffs_from_all.len() - 1;
                 if old_public_key != *coeffs_from_all[last][0].as_ref() {
                     error!("The new public key share is inconsistent with the old one.");
@@ -925,7 +924,7 @@ impl TshareParticipant {
             let output = Output::from_parts(
                 all_public_coeffs.clone(),
                 all_public_keys,
-                my_private_share.x.clone(),
+                my_private_share.x,
             )?;
 
             self.status = Status::TerminatedSuccessfully;
@@ -1086,7 +1085,7 @@ mod tests {
         let mut rng = init_testing_with_seed(Default::default());
         let sid = Identifier::random(&mut rng);
         let test_share = Some(CoeffPrivate {
-            x: BigNumber::from(42),
+            x: Scalar::from_u128(42),
         });
         let mut quorum = TshareParticipant::new_quorum(sid, quorum_size, test_share, &mut rng)?;
         let mut inboxes = HashMap::new();
@@ -1166,7 +1165,7 @@ mod tests {
             let public_share = TshareParticipant::eval_public_share(&publics_coeffs, pid)?;
 
             let expected_public_share =
-                CurvePoint::GENERATOR.multiply_by_bignum(output.private_key_share())?;
+                CurvePoint::GENERATOR.multiply_by_scalar(output.private_key_share());
             // if the output already contains the public key, then we don't need to
             // recompute and check it here.
             assert_eq!(public_share, expected_public_share);

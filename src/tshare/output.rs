@@ -5,7 +5,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use libpaillier::unknown_order::BigNumber;
+use k256::Scalar;
 use std::collections::HashSet;
 
 use crate::{
@@ -28,7 +28,7 @@ pub struct Output {
     // Public keys for each participant
     public_key_shares: Vec<KeySharePublic>,
     //private_key_share: KeySharePrivate,
-    private_key_share: BigNumber,
+    private_key_share: Scalar,
 }
 
 impl Output {
@@ -57,7 +57,7 @@ impl Output {
     }
 
     /// Get the private share
-    pub fn private_key_share(&self) -> &BigNumber {
+    pub fn private_key_share(&self) -> &Scalar {
         &self.private_key_share
     }
 
@@ -74,7 +74,7 @@ impl Output {
     pub fn from_parts(
         public_coeffs: Vec<CoeffPublic>,
         public_keys: Vec<KeySharePublic>,
-        private_key_share: BigNumber,
+        private_key_share: Scalar,
     ) -> Result<Self> {
         let pids = public_keys
             .iter()
@@ -89,7 +89,6 @@ impl Output {
             Err(CallerError::BadInput)?
         }
 
-        // TODO: Validate the private key share using Feldman's VSS
         Ok(Self {
             public_coeffs,
             public_key_shares: public_keys,
@@ -106,7 +105,7 @@ impl Output {
     ///
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
-    pub fn into_parts(self) -> (Vec<CoeffPublic>, Vec<KeySharePublic>, BigNumber) {
+    pub fn into_parts(self) -> (Vec<CoeffPublic>, Vec<KeySharePublic>, Scalar) {
         (
             self.public_coeffs,
             self.public_key_shares,
@@ -120,10 +119,12 @@ mod tests {
     use super::*;
     use crate::{
         tshare::{CoeffPrivate, CoeffPublic, TshareParticipant},
-        utils::{k256_order, testing::init_testing},
+        utils::{bn_to_scalar, k256_order, testing::init_testing},
         ParticipantIdentifier,
     };
     use itertools::Itertools;
+    use k256::elliptic_curve::Field;
+    use libpaillier::unknown_order::BigNumber;
 
     impl Output {
         /// Simulate the valid output of a keygen run with the given
@@ -152,7 +153,9 @@ mod tests {
                 .collect::<Vec<_>>();
             let converted_privates = private_key_shares
                 .iter()
-                .map(|x| CoeffPrivate { x: x.clone() })
+                .map(|x| CoeffPrivate {
+                    x: bn_to_scalar(x).unwrap(),
+                })
                 .collect::<Vec<_>>();
             let eval_public_at_first_pid =
                 TshareParticipant::eval_public_share(converted_publics.as_slice(), pids[0])
@@ -163,11 +166,11 @@ mod tests {
             let output = Self::from_parts(
                 converted_publics,
                 public_key_shares,
-                eval_private_at_first_pid.x.clone(),
+                eval_private_at_first_pid.x,
             )
             .unwrap();
 
-            let implied_public = eval_private_at_first_pid.public_point().unwrap();
+            let implied_public = eval_private_at_first_pid.public_point();
             assert!(implied_public == eval_public_at_first_pid);
             output
         }
@@ -187,7 +190,7 @@ mod tests {
 
     #[test]
     fn public_shares_must_not_have_duplicate_pids() {
-        let rng = &mut init_testing();
+        let mut rng = &mut init_testing();
         let mut pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(5)
             .collect::<Vec<_>>();
@@ -200,10 +203,8 @@ mod tests {
             pids.iter()
                 .map(|&pid| {
                     // TODO #340: Replace with KeyShare methods once they exist.
-                    let secret = BigNumber::random(&k256_order());
-                    let public = CurvePoint::GENERATOR
-                        .multiply_by_bignum(&secret)
-                        .expect("can't multiply by generator");
+                    let secret = Scalar::random(&mut rng);
+                    let public = CurvePoint::GENERATOR.multiply_by_scalar(&secret);
                     (
                         secret,
                         KeySharePublic::new(pid, public),
