@@ -20,7 +20,8 @@ use tracing::error;
 use super::CoeffPublic;
 
 /// Output type from key generation, including all parties' public key shares,
-/// this party's private key share, and a bit of global randomness.
+/// this party's private key share, and the public coefficients from the
+/// subjacent Lagrange interpolation.
 #[derive(Debug, Clone)]
 pub struct Output {
     // Public coefficients for the polynomial
@@ -146,7 +147,6 @@ mod tests {
                 .unzip();
 
             // simulate a random evaluation
-            //let new_secret = BigNumber::random(&k256_order());
             let converted_publics = public_key_shares
                 .iter()
                 .map(|x| CoeffPublic::new(*x.as_ref()))
@@ -162,7 +162,6 @@ mod tests {
                     .unwrap();
             let eval_private_at_first_pid =
                 TshareParticipant::eval_private_share(converted_privates.as_slice(), pids[0]);
-            //Self::from_parts(public_key_shares, new_secret).unwrap()
             let output = Self::from_parts(
                 converted_publics,
                 public_key_shares,

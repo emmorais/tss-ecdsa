@@ -679,8 +679,7 @@ impl TshareParticipant {
             if all_participants.contains(pid) {
                 let output = tshares.get(pid).unwrap();
                 let private_key = output.private_key_share();
-                let private_share =
-                    KeySharePrivate::from_bigint(&scalar_to_bn(private_key));
+                let private_share = KeySharePrivate::from_bigint(&scalar_to_bn(private_key));
                 let public_share = CurvePoint::GENERATOR.multiply_by_scalar(private_key);
                 let lagrange = Self::lagrange_coefficient_at_zero(pid, &all_participants);
                 let new_private_share: BigNumber =

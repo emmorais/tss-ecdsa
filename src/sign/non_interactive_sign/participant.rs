@@ -426,7 +426,6 @@ impl SignParticipant {
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;
 
-        dbg!("BEFORE VERIFICATION");
         // Verify signature
         self.input
             .public_key()?
@@ -435,7 +434,6 @@ impl SignParticipant {
                 error!("Failed to verify signature {:?}", e);
                 InternalError::ProtocolError(None)
             })?;
-        dbg!("AFTER VERIFICATION"); // FIXME: it doesn't get here
 
         // Output full signature
         self.status = Status::TerminatedSuccessfully;

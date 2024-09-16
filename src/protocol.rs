@@ -880,9 +880,10 @@ mod tests {
         n: usize,
     ) -> Result<()> {
         let mut rng = init_testing();
-        let QUORUM_REAL = r;
-        let QUORUM_THRESHOLD = t; // threshold t
-        let QUORUM_SIZE = n; // total number of participants
+        let QUORUM_REAL = r; // The real quorum size, which is the number of participants that will actually
+                             // participate in the protocol
+        let QUORUM_THRESHOLD = t; // threshold t, which is the minimum quorum allowed to complete the protocol
+        let QUORUM_SIZE = n; // total number of participants in the protocol
 
         // Set GLOBAL config for participants
         let mut configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng).unwrap();
@@ -972,9 +973,11 @@ mod tests {
             .all(|p| *p.status() == Status::TerminatedSuccessfully));
 
         // Tshare protocol
+        // After the Tshare protocol, we will have a set of t-out-of-t shares
+        // Therefore we need to remove the some participants from the configs, and from
+        // keygen and auxinfo outputs
         let mut keygen_outputs_tshare = keygen_outputs.clone();
         let auxinfo_outputs_tshare = auxinfo_outputs.clone();
-        // Set up tshare participants
         let tshare_sid = Identifier::random(&mut rng);
 
         let tshare_inputs = configs
@@ -1086,18 +1089,16 @@ mod tests {
             .public_key()?;
 
         // Set up presign participants
-        // Clone auxinfo outputs for presigning
-        //let mut auxinfo_outputs_presign = auxinfo_outputs_tshare.clone();
         let mut auxinfo_outputs_presign = HashMap::new();
 
-        // remove elements not in `all` from auxinfo_outputs_presign
+        // remove elements not in `all-participants` from auxinfo_outputs_presign
         for pid in auxinfo_outputs_tshare.keys() {
             if all_participants.contains(pid) {
                 let output = auxinfo_outputs_tshare.get(pid).unwrap();
                 let new_aux_pk: Vec<AuxInfoPublic> = output
                     .public_auxinfo()
                     .iter()
-                    .filter(|k| all_participants.contains(&k.participant()))
+                    .filter(|auxinfo| all_participants.contains(&auxinfo.participant()))
                     .cloned()
                     .collect();
                 let new_output =
