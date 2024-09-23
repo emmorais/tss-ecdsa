@@ -47,6 +47,10 @@ mod storage {
     impl TypeTag for SchnorrPrecom {
         type Value = PiSchPrecommit;
     }
+    pub(super) struct ChainCode;
+    impl TypeTag for ChainCode {
+        type Value = [u8; 32];
+    }
     pub(super) struct GlobalRid;
     impl TypeTag for GlobalRid {
         type Value = [u8; 32];
@@ -473,6 +477,7 @@ impl KeygenParticipant {
             })
             .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
+        let mut chain_code = my_decom.chain_code;
         let mut global_rid = my_decom.rid;
         // xor all the rids together. In principle, many different options for combining
         // these should be okay
@@ -481,6 +486,8 @@ impl KeygenParticipant {
                 global_rid[i] ^= rid[i];
             }
         }
+        self.local_storage
+            .store::<storage::ChainCode>(self.id, chain_code);
         self.local_storage
             .store::<storage::GlobalRid>(self.id, global_rid);
         let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
@@ -533,6 +540,7 @@ impl KeygenParticipant {
         }
         let proof = PiSchProof::from_message(message)?;
         let global_rid = *self.local_storage.retrieve::<storage::GlobalRid>(self.id)?;
+        let chain_code = *self.local_storage.retrieve::<storage::ChainCode>(self.id)?;
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
@@ -566,7 +574,7 @@ impl KeygenParticipant {
                 .remove::<storage::PrivateKeyshare>(self.id)?;
             self.status = Status::TerminatedSuccessfully;
 
-            let output = Output::from_parts(public_key_shares, private_key_share, global_rid)?;
+            let output = Output::from_parts(public_key_shares, private_key_share, chain_code, global_rid)?;
             Ok(ProcessOutcome::Terminated(output))
         } else {
             // Otherwise, we'll have to wait for more round three messages.
