@@ -1176,10 +1176,9 @@ mod tests {
         // compute the hash of the saved_public_key, chain_code, counter
         let counter_vec: Vec<u8> = counter.to_le_bytes().to_vec();
         // Get first output
-        let first_output = keygen_outputs_clone.values().next();
+        let first_output = keygen_outputs_clone.values().next().expect("could not get the first output");
 
         let chain_code = first_output
-            .expect("could not get the first output")
             .chain_code()
             .to_vec();
 
@@ -1194,7 +1193,6 @@ mod tests {
 
         let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift_scalar);
         let saved_shifted_public_key = first_output
-            .expect("could not get the first output")
             .shifted_public_key(&shifted_point)?;
 
         // Make signing participants
