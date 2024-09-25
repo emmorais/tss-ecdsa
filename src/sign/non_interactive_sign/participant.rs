@@ -148,23 +148,6 @@ impl Input {
             CallerError::BadInput.into()
         })
     }
-
-    /// Compute the public key with the shift value applied.
-    pub fn shifted_public_key(&self) -> Result<VerifyingKey> {
-        // Add up all the key shares
-        let public_key_point = self
-            .public_key_shares
-            .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
-
-        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&self.shift_value());
-        let shifted_public_key_point = public_key_point + shifted_point;
-
-        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key.");
-            InternalError::InternalInvariantFailed
-        })
-    }
 }
 
 /// Context for fiat-Shamir proofs generated in the non-interactive signing
@@ -329,6 +312,26 @@ impl InnerProtocolParticipant for SignParticipant {
 }
 
 impl SignParticipant {
+    /// Compute the public key with the shift value applied.
+    pub fn shifted_public_key(
+        &self,
+        public_key_shares: Vec<KeySharePublic>,
+        shift: Scalar,
+    ) -> Result<VerifyingKey> {
+        // Add up all the key shares
+        let public_key_point = public_key_shares
+            .iter()
+            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+
+        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift);
+        let shifted_public_key_point = public_key_point + shifted_point;
+
+        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
+            error!("Keygen output does not produce a valid public key.");
+            InternalError::InternalInvariantFailed
+        })
+    }
+
     /// Handle a "Ready" message from ourselves.
     ///
     /// Once a "Ready" message has been received, continue to generate the round
@@ -444,14 +447,15 @@ impl SignParticipant {
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;
 
-        // Verify signature
-        self.input
-            .shifted_public_key()?
-            .verify_digest(self.input.digest.clone(), signature.as_ref())
-            .map_err(|e| {
-                error!("Failed to verify signature {:?}", e);
-                InternalError::ProtocolError(None)
-            })?;
+        self.shifted_public_key(
+            self.input.public_key_shares.clone(),
+            self.input.shift_value(),
+        )?
+        .verify_digest(self.input.digest.clone(), signature.as_ref())
+        .map_err(|e| {
+            error!("Failed to verify signature {:?}", e);
+            InternalError::ProtocolError(None)
+        })?;
 
         // Output full signature
         self.status = Status::TerminatedSuccessfully;

@@ -42,22 +42,6 @@ impl Output {
         })
     }
 
-    /// Construct the generated public key, shifted by the given point.
-    pub fn shifted_public_key(&self, shift: &CurvePoint) -> Result<VerifyingKey> {
-        // Add up all the key shares
-        let public_key_point = self
-            .public_key_shares
-            .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
-
-        let shifted_public_key_point = public_key_point + *shift;
-
-        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key.");
-            InternalError::InternalInvariantFailed
-        })
-    }
-
     /// Get the individual shares of the public key.
     pub fn public_key_shares(&self) -> &[KeySharePublic] {
         &self.public_key_shares

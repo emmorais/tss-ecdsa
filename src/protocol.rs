@@ -821,7 +821,11 @@ mod tests {
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
-    fn full_protocol_execution_with_noninteractive_signing_works() -> Result<()> {
+    fn test_full_protocol_execution_with_noninteractive_signing_works() {
+        assert!(full_protocol_execution_with_noninteractive_signing_works(42).is_ok());
+    }
+
+    fn full_protocol_execution_with_noninteractive_signing_works(counter: i32) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
         // Set GLOBAL config for participants
@@ -980,15 +984,15 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
-        let counter: i32 = 42;
         // compute the hash of the saved_public_key, chain_code, counter
         let counter_vec: Vec<u8> = counter.to_le_bytes().to_vec();
         // Get first output
-        let first_output = keygen_outputs_clone.values().next().expect("could not get the first output");
+        let first_output = keygen_outputs_clone
+            .values()
+            .next()
+            .expect("could not get the first output");
 
-        let chain_code = first_output
-            .chain_code()
-            .to_vec();
+        let chain_code = first_output.chain_code().to_vec();
 
         let mut shift_input = Vec::new();
         shift_input.extend(saved_public_key.to_sec1_bytes().iter());
@@ -998,10 +1002,6 @@ mod tests {
         let shift = Keccak256::new_with_prefix(shift_input);
         let shift_scalar =
             bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
-
-        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift_scalar);
-        let saved_shifted_public_key = first_output
-            .shifted_public_key(&shifted_point)?;
 
         // Make signing participants
         let mut sign_quorum = configs
@@ -1044,7 +1044,11 @@ mod tests {
         // Validate output: everyone should get the same signature...
         assert!(sign_outputs.windows(2).all(|sig| sig[0] == sig[1]));
 
-        // ...and the signature should be valid under the public key we saved
+        // get the first participant and then call shifted_public_key
+        let first_participant = sign_quorum.first().unwrap();
+        let saved_shifted_public_key = first_participant
+            .participant
+            .shifted_public_key(public_key_shares, shift_scalar)?;
         assert!(saved_shifted_public_key
             .verify_digest(digest, sign_outputs[0].as_ref())
             .is_ok());
