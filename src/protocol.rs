@@ -619,7 +619,8 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
-        utils::{bn_to_scalar, testing::init_testing},
+        slip0010,
+        utils::testing::init_testing,
         PresignParticipant,
     };
     use core::panic;
@@ -822,10 +823,11 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
+        assert!(full_protocol_execution_with_noninteractive_signing_works(0).is_err());
         assert!(full_protocol_execution_with_noninteractive_signing_works(42).is_ok());
     }
 
-    fn full_protocol_execution_with_noninteractive_signing_works(counter: i32) -> Result<()> {
+    fn full_protocol_execution_with_noninteractive_signing_works(counter: u32) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
         // Set GLOBAL config for participants
@@ -984,24 +986,17 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
-        // compute the hash of the saved_public_key, chain_code, counter
-        let counter_vec: Vec<u8> = counter.to_le_bytes().to_vec();
         // Get first output
         let first_output = keygen_outputs_clone
             .values()
             .next()
             .expect("could not get the first output");
 
-        let chain_code = first_output.chain_code().to_vec();
+        // TODO: generate in a distributed way
+        let chain_code = first_output.chain_code();
 
-        let mut shift_input = Vec::new();
-        shift_input.extend(saved_public_key.to_sec1_bytes().iter());
-        shift_input.extend(chain_code.clone());
-        shift_input.extend(counter_vec.clone());
-
-        let shift = Keccak256::new_with_prefix(shift_input);
-        let shift_scalar =
-            bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
+        let shift_input = slip0010::ckd::CKDInput::new(saved_public_key, *chain_code, counter)?;
+        let shift_scalar = slip0010::ckd::CKDInput::derive(&shift_input);
 
         // Make signing participants
         let mut sign_quorum = configs
