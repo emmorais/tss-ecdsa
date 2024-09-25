@@ -222,6 +222,7 @@ mod protocol;
 mod ring_pedersen;
 pub mod sign;
 pub mod tshare;
+pub mod slip0010;
 mod utils;
 mod zkp;
 mod zkstar;

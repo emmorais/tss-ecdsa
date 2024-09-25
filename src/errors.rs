@@ -61,6 +61,8 @@ pub enum CallerError {
     DeserializationFailed,
     #[error("Failed to compute recovery ID for signature")]
     SignatureTrialRecoveryFailed,
+    #[error("Received a wrong index for the key derivation")]
+    WrongIndex,
 }
 
 macro_rules! serialize {
