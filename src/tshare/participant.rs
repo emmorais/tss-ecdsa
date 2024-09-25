@@ -660,6 +660,7 @@ impl TshareParticipant {
     pub fn convert_to_t_out_of_t_shares(
         tshares: HashMap<ParticipantIdentifier, Output>,
         all_participants: Vec<ParticipantIdentifier>,
+        chain_code: [u8; 32],
         rid: [u8; 32],
     ) -> Result<(
         HashMap<ParticipantIdentifier, <KeygenParticipant as ProtocolParticipant>::Output>,
@@ -693,7 +694,7 @@ impl TshareParticipant {
         > = HashMap::new();
         for (pid, private_key_share) in new_private_shares {
             let output =
-                crate::keygen::Output::from_parts(public_keys.clone(), private_key_share, rid)?;
+                crate::keygen::Output::from_parts(public_keys.clone(), private_key_share, chain_code, rid)?;
             assert!(keygen_outputs.insert(pid, output).is_none());
         }
         Ok((keygen_outputs, public_keys))

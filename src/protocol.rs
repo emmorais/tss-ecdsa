@@ -643,19 +643,12 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
-<<<<<<< HEAD
         tshare::{self, CoeffPrivate, TshareParticipant},
         utils::{bn_to_scalar, testing::init_testing},
         PresignParticipant,
     };
     use k256::{ecdsa::signature::DigestVerifier, Scalar};
-=======
-        utils::{bn_to_scalar, testing::init_testing},
-        PresignParticipant,
-    };
     use core::panic;
-    use k256::ecdsa::signature::DigestVerifier;
->>>>>>> c95a001 (Add shift to signature generation)
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
     use std::{collections::HashMap, vec};
@@ -854,38 +847,39 @@ mod tests {
     #[ignore]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works_larger_values() {
-        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 5, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 4, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 4, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 3, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 3, 5).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 5).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 5, 5, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 4, 5, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 4, 5, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(5, 3, 5, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(4, 3, 5, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 5, 42).is_ok());
     }
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works() {
-        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 2, 3).is_ok());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 2, 3, 42).is_ok());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3, 42).is_ok());
     }
 
     #[ignore]
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works_err_larger_values() {
-        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 4, 5).is_err());
-        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 4, 5).is_err());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 4, 5, 42).is_err());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 4, 5, 42).is_err());
     }
 
     #[test]
     fn test_full_protocol_execution_with_noninteractive_signing_works_err() {
-        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 3, 4).is_err());
+        assert!(full_protocol_execution_with_noninteractive_signing_works(2, 3, 4, 42).is_err());
     }
 
     fn full_protocol_execution_with_noninteractive_signing_works(
         r: usize,
         t: usize,
         n: usize,
+        counter: i32,
     ) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_REAL = r; // The real quorum size, which is the number of participants that will actually
@@ -1063,11 +1057,13 @@ mod tests {
         let all_participants = configs.first().unwrap().all_participants();
 
         // t-out-of-t conversion
+        let chain_code = keygen_outputs[&configs[0].id()].chain_code();
         let rid = keygen_outputs[&configs[0].id()].rid();
         let (mut toft_keygen_outputs, toft_public_keys) =
             TshareParticipant::convert_to_t_out_of_t_shares(
                 tshare_outputs,
                 all_participants.clone(),
+                *chain_code,
                 *rid,
             )?;
 
@@ -1091,6 +1087,11 @@ mod tests {
             );
         }
 
+        let public_key_shares = toft_keygen_outputs
+            .get(&configs.first().unwrap().id())
+            .unwrap()
+            .public_key_shares()
+            .to_vec();
         let saved_public_key = toft_keygen_outputs
             .get(&configs.first().unwrap().id())
             .unwrap()
@@ -1172,15 +1173,15 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
-        let counter: i32 = 42;
         // compute the hash of the saved_public_key, chain_code, counter
         let counter_vec: Vec<u8> = counter.to_le_bytes().to_vec();
         // Get first output
-        let first_output = keygen_outputs_clone.values().next().expect("could not get the first output");
+        let first_output = keygen_outputs_clone
+            .values()
+            .next()
+            .expect("could not get the first output");
 
-        let chain_code = first_output
-            .chain_code()
-            .to_vec();
+        let chain_code = first_output.chain_code().to_vec();
 
         let mut shift_input = Vec::new();
         shift_input.extend(saved_public_key.to_sec1_bytes().iter());
@@ -1191,27 +1192,14 @@ mod tests {
         let shift_scalar =
             bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
 
-        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift_scalar);
-        let saved_shifted_public_key = first_output
-            .shifted_public_key(&shifted_point)?;
-
         // Make signing participants
         let mut sign_quorum = configs
             .clone()
             .into_iter()
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
-<<<<<<< HEAD
                 let input =
-                    sign::Input::new(message, record, toft_public_keys.clone(), QUORUM_THRESHOLD);
-=======
-                let input = sign::Input::new(
-                    message,
-                    record,
-                    public_key_shares.clone(),
-                    Some(shift_scalar),
-                );
->>>>>>> c95a001 (Add shift to signature generation)
+                    sign::Input::new(message, record, toft_public_keys.clone(), QUORUM_THRESHOLD, Some(shift_scalar));
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1242,7 +1230,11 @@ mod tests {
         // Validate output: everyone should get the same signature...
         assert!(sign_outputs.windows(2).all(|sig| sig[0] == sig[1]));
 
-        // ...and the signature should be valid under the public key we saved
+        // get the first participant and then call shifted_public_key
+        let first_participant = sign_quorum.first().unwrap();
+        let saved_shifted_public_key = first_participant
+            .participant
+            .shifted_public_key(public_key_shares, shift_scalar)?;
         assert!(saved_shifted_public_key
             .verify_digest(digest, sign_outputs[0].as_ref())
             .is_ok());

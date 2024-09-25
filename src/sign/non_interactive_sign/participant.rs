@@ -79,11 +79,8 @@ pub struct Input {
     digest: Keccak256,
     presign_record: PresignRecord,
     public_key_shares: Vec<KeySharePublic>,
-<<<<<<< HEAD
     threshold: usize,
-=======
     shift: Option<Scalar>,
->>>>>>> c95a001 (Add shift to signature generation)
 }
 
 impl Input {
@@ -95,21 +92,15 @@ impl Input {
         message: &[u8],
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-<<<<<<< HEAD
         threshold: usize,
-=======
         shift: Option<Scalar>,
->>>>>>> c95a001 (Add shift to signature generation)
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
             presign_record: record,
             public_key_shares,
-<<<<<<< HEAD
             threshold,
-=======
             shift,
->>>>>>> c95a001 (Add shift to signature generation)
         }
     }
 
@@ -121,21 +112,15 @@ impl Input {
         digest: Keccak256,
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
-<<<<<<< HEAD
         threshold: usize,
-=======
         shift: Option<Scalar>,
->>>>>>> c95a001 (Add shift to signature generation)
     ) -> Self {
         Self {
             digest,
             presign_record: record,
             public_key_shares,
-<<<<<<< HEAD
             threshold,
-=======
             shift,
->>>>>>> c95a001 (Add shift to signature generation)
         }
     }
 
@@ -166,23 +151,6 @@ impl Input {
         VerifyingKey::from_encoded_point(&public_key_point.into()).map_err(|_| {
             error!("Keygen output does not produce a valid public key");
             CallerError::BadInput.into()
-        })
-    }
-
-    /// Compute the public key with the shift value applied.
-    pub fn shifted_public_key(&self) -> Result<VerifyingKey> {
-        // Add up all the key shares
-        let public_key_point = self
-            .public_key_shares
-            .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
-
-        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&self.shift_value());
-        let shifted_public_key_point = public_key_point + shifted_point;
-
-        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key.");
-            InternalError::InternalInvariantFailed
         })
     }
 }
@@ -352,6 +320,26 @@ impl InnerProtocolParticipant for SignParticipant {
 }
 
 impl SignParticipant {
+    /// Compute the public key with the shift value applied.
+    pub fn shifted_public_key(
+        &self,
+        public_key_shares: Vec<KeySharePublic>,
+        shift: Scalar,
+    ) -> Result<VerifyingKey> {
+        // Add up all the key shares
+        let public_key_point = public_key_shares
+            .iter()
+            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+
+        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift);
+        let shifted_public_key_point = public_key_point + shifted_point;
+
+        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
+            error!("Keygen output does not produce a valid public key.");
+            InternalError::InternalInvariantFailed
+        })
+    }
+
     /// Handle a "Ready" message from ourselves.
     ///
     /// Once a "Ready" message has been received, continue to generate the round
@@ -471,14 +459,15 @@ impl SignParticipant {
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;
 
-        // Verify signature
-        self.input
-            .shifted_public_key()?
-            .verify_digest(self.input.digest.clone(), signature.as_ref())
-            .map_err(|e| {
-                error!("Failed to verify signature {:?}", e);
-                InternalError::ProtocolError(None)
-            })?;
+        self.shifted_public_key(
+            self.input.public_key_shares.clone(),
+            self.input.shift_value(),
+        )?
+        .verify_digest(self.input.digest.clone(), signature.as_ref())
+        .map_err(|e| {
+            error!("Failed to verify signature {:?}", e);
+            InternalError::ProtocolError(None)
+        })?;
 
         // Output full signature
         self.status = Status::TerminatedSuccessfully;
@@ -608,16 +597,13 @@ mod test {
 
         // Form signing inputs and participants
         let inputs = std::iter::zip(keygen_outputs, presign_records).map(|(keygen, record)| {
-<<<<<<< HEAD
             sign::Input::new(
                 message,
                 record,
                 keygen.public_key_shares().to_vec(),
                 quorum_size,
+                None,
             )
-=======
-            sign::Input::new(message, record, keygen.public_key_shares().to_vec(), None)
->>>>>>> c95a001 (Add shift to signature generation)
         });
         let mut quorum = std::iter::zip(configs, inputs)
             .map(|(config, input)| {
@@ -739,6 +725,7 @@ mod test {
             presign_record,
             keygen_output.public_key_shares().to_vec(),
             threshold,
+            None, 
         );
 
         let participant = SignParticipant::new(sid, id, other_participant_ids, input);
