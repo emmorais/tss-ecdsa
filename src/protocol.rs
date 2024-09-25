@@ -619,9 +619,10 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
-        utils::testing::init_testing,
+        utils::{bn_to_scalar, testing::init_testing},
         PresignParticipant,
     };
+    use core::panic;
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
@@ -920,6 +921,7 @@ mod tests {
             .get(&configs.first().unwrap().id())
             .unwrap()
             .public_key()?;
+        let keygen_outputs_clone = keygen_outputs.clone();
 
         // Set up presign participants
         let presign_sid = Identifier::random(&mut rng);
@@ -978,12 +980,42 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
+        let counter: i32 = 42;
+        // compute the hash of the saved_public_key, chain_code, counter
+        let counter_vec: Vec<u8> = counter.to_le_bytes().to_vec();
+        // Get first output
+        let first_output = keygen_outputs_clone.values().next();
+
+        let chain_code = first_output
+            .expect("dwoioaidjkaioljd")
+            .chain_code()
+            .to_vec();
+
+        let mut shift_input = Vec::new();
+        shift_input.extend(saved_public_key.to_sec1_bytes().iter());
+        shift_input.extend(chain_code.clone());
+        shift_input.extend(counter_vec.clone());
+
+        let shift = Keccak256::new_with_prefix(shift_input);
+        let shift_scalar =
+            bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
+
+        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift_scalar);
+        let saved_shifted_public_key = first_output
+            .expect("edwadwad")
+            .shifted_public_key(&shifted_point)?;
+
         // Make signing participants
         let mut sign_quorum = configs
             .into_iter()
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
-                let input = sign::Input::new(message, record, public_key_shares.clone());
+                let input = sign::Input::new(
+                    message,
+                    record,
+                    public_key_shares.clone(),
+                    Some(shift_scalar),
+                );
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1015,7 +1047,7 @@ mod tests {
         assert!(sign_outputs.windows(2).all(|sig| sig[0] == sig[1]));
 
         // ...and the signature should be valid under the public key we saved
-        assert!(saved_public_key
+        assert!(saved_shifted_public_key
             .verify_digest(digest, sign_outputs[0].as_ref())
             .is_ok());
 
