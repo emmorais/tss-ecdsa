@@ -1179,7 +1179,7 @@ mod tests {
         let first_output = keygen_outputs_clone.values().next();
 
         let chain_code = first_output
-            .expect("dwoioaidjkaioljd")
+            .expect("could not get the first output")
             .chain_code()
             .to_vec();
 
@@ -1194,7 +1194,7 @@ mod tests {
 
         let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift_scalar);
         let saved_shifted_public_key = first_output
-            .expect("edwadwad")
+            .expect("could not get the first output")
             .shifted_public_key(&shifted_point)?;
 
         // Make signing participants
