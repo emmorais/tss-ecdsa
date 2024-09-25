@@ -427,8 +427,12 @@ impl Worker {
         let key_shares = self.key_gen_material.retrieve(&key_id).public_key_shares();
         let record = self.presign_records.take(&key_id);
 
+<<<<<<< HEAD
         let threshold = key_shares.len();
         let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec(), threshold);
+=======
+        let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec(), None);
+>>>>>>> c95a001 (Add shift to signature generation)
         self.new_sub_protocol::<SignParticipant>(sid, inputs, key_id)
     }
 }

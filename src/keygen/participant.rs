@@ -477,7 +477,7 @@ impl KeygenParticipant {
             })
             .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
-        let mut chain_code = my_decom.chain_code;
+        let chain_code = my_decom.chain_code;
         let mut global_rid = my_decom.rid;
         // xor all the rids together. In principle, many different options for combining
         // these should be okay
@@ -574,7 +574,8 @@ impl KeygenParticipant {
                 .remove::<storage::PrivateKeyshare>(self.id)?;
             self.status = Status::TerminatedSuccessfully;
 
-            let output = Output::from_parts(public_key_shares, private_key_share, chain_code, global_rid)?;
+            let output =
+                Output::from_parts(public_key_shares, private_key_share, chain_code, global_rid)?;
             Ok(ProcessOutcome::Terminated(output))
         } else {
             // Otherwise, we'll have to wait for more round three messages.

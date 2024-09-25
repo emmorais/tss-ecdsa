@@ -42,6 +42,22 @@ impl Output {
         })
     }
 
+    /// Construct the generated public key, shifted by the given point.
+    pub fn shifted_public_key(&self, shift: &CurvePoint) -> Result<VerifyingKey> {
+        // Add up all the key shares
+        let public_key_point = self
+            .public_key_shares
+            .iter()
+            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+
+        let shifted_public_key_point = public_key_point + *shift;
+
+        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
+            error!("Keygen output does not produce a valid public key.");
+            InternalError::InternalInvariantFailed
+        })
+    }
+
     /// Get the individual shares of the public key.
     pub fn public_key_shares(&self) -> &[KeySharePublic] {
         &self.public_key_shares
@@ -130,7 +146,12 @@ impl Output {
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
     pub fn into_parts(self) -> (Vec<KeySharePublic>, KeySharePrivate, [u8; 32], [u8; 32]) {
-        (self.public_key_shares, self.private_key_share, self.chain_code, self.rid)
+        (
+            self.public_key_shares,
+            self.private_key_share,
+            self.chain_code,
+            self.rid,
+        )
     }
 }
 
@@ -163,7 +184,13 @@ mod tests {
             let chain_code = rng.gen();
             let rid = rng.gen();
 
-            Self::from_parts(public_key_shares, private_key_shares.pop().unwrap(), chain_code, rid).unwrap()
+            Self::from_parts(
+                public_key_shares,
+                private_key_shares.pop().unwrap(),
+                chain_code,
+                rid,
+            )
+            .unwrap()
         }
 
         /// Simulate a consistent, valid output of a keygen run with the given
@@ -192,7 +219,13 @@ mod tests {
             private_key_shares
                 .into_iter()
                 .map(|private_key_share| {
-                    Self::from_parts(public_key_shares.clone(), private_key_share, chain_code, rid).unwrap()
+                    Self::from_parts(
+                        public_key_shares.clone(),
+                        private_key_share,
+                        chain_code,
+                        rid,
+                    )
+                    .unwrap()
                 })
                 .collect()
         }
@@ -224,10 +257,13 @@ mod tests {
         // the public keys but it's so unlikely that we won't check it.
         let bad_private_key_share = KeySharePrivate::random(rng);
 
-        assert!(
-            Output::from_parts(output.public_key_shares, bad_private_key_share, output.chain_code, output.rid)
-                .is_err()
+        assert!(Output::from_parts(
+            output.public_key_shares,
+            bad_private_key_share,
+            output.chain_code,
+            output.rid
         )
+        .is_err())
     }
 
     #[test]
@@ -254,8 +290,12 @@ mod tests {
         let chain_code = rng.gen();
         let rid = rng.gen();
 
-        assert!(
-            Output::from_parts(public_key_shares, private_key_shares.pop().unwrap(), chain_code, rid).is_err()
-        );
+        assert!(Output::from_parts(
+            public_key_shares,
+            private_key_shares.pop().unwrap(),
+            chain_code,
+            rid
+        )
+        .is_err());
     }
 }

@@ -111,11 +111,16 @@ impl SigningMaterial {
                 digest,
                 public_keys,
             } => {
+<<<<<<< HEAD
                 // TODO: threhsold is not implemented yet for the interactive signing, must use
                 // the same as the public keys size
                 let threshold = public_keys.len();
                 let signing_input =
                     sign::Input::new_from_digest(*digest, record, public_keys, threshold);
+=======
+                let signing_input =
+                    sign::Input::new_from_digest(*digest, record, public_keys, None);
+>>>>>>> c95a001 (Add shift to signature generation)
                 // Note: this shouldn't throw an error because the only failure case should have
                 // also been checked by the presign constructor, and computation
                 // halted far before we reach this point.
