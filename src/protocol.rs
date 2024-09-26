@@ -1180,7 +1180,6 @@ mod tests {
             .next()
             .expect("could not get the first output");
 
-        // TODO: generate in a distributed way
         let chain_code = first_output.chain_code();
 
         let shift_input = slip0010::ckd::CKDInput::new(saved_public_key, *chain_code, counter)?;

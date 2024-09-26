@@ -465,6 +465,17 @@ impl KeygenParticipant {
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
         info!("Generating round three keygen messages.");
 
+        // Construct `global chain_code` out of each participant's `chain_code`.
+        let chain_codes: Vec<[u8; 32]> = self
+            .other_participant_ids
+            .iter()
+            .map(|&other_participant_id| {
+                let decom = self
+                    .local_storage
+                    .retrieve::<storage::Decommit>(other_participant_id)?;
+                Ok(decom.chain_code)
+            })
+            .collect::<Result<Vec<[u8; 32]>>>()?;
         // Construct `global rid` out of each participant's `rid`s.
         let rids: Vec<[u8; 32]> = self
             .other_participant_ids
@@ -477,8 +488,15 @@ impl KeygenParticipant {
             })
             .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
-        let chain_code = my_decom.chain_code;
+        let mut global_chain_code = my_decom.chain_code;
         let mut global_rid = my_decom.rid;
+        // xor all the chain_codes together. In principle, many different options for
+        // combining these should be okay
+        for chain_code in chain_codes.iter() {
+            for i in 0..32 {
+                global_chain_code[i] ^= chain_code[i];
+            }
+        }
         // xor all the rids together. In principle, many different options for combining
         // these should be okay
         for rid in rids.iter() {
@@ -487,10 +505,11 @@ impl KeygenParticipant {
             }
         }
         self.local_storage
-            .store::<storage::ChainCode>(self.id, chain_code);
+            .store::<storage::ChainCode>(self.id, global_chain_code);
         self.local_storage
             .store::<storage::GlobalRid>(self.id, global_rid);
-        let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
+        let transcript =
+            schnorr_proof_transcript(self.sid(), &global_chain_code, &global_rid, self.id())?;
 
         let precom = self
             .local_storage
@@ -540,7 +559,7 @@ impl KeygenParticipant {
         }
         let proof = PiSchProof::from_message(message)?;
         let global_rid = *self.local_storage.retrieve::<storage::GlobalRid>(self.id)?;
-        let chain_code = *self.local_storage.retrieve::<storage::ChainCode>(self.id)?;
+        let global_chain_code = *self.local_storage.retrieve::<storage::ChainCode>(self.id)?;
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
@@ -548,7 +567,8 @@ impl KeygenParticipant {
 
         let input = CommonInput::new(&decom.pk);
 
-        let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
+        let mut transcript =
+            schnorr_proof_transcript(self.sid(), &global_chain_code, &global_rid, message.from())?;
         proof.verify_with_precommit(input, &self.retrieve_context(), &mut transcript, precommit)?;
 
         // Only if the proof verifies do we store the participant's public key
@@ -574,8 +594,12 @@ impl KeygenParticipant {
                 .remove::<storage::PrivateKeyshare>(self.id)?;
             self.status = Status::TerminatedSuccessfully;
 
-            let output =
-                Output::from_parts(public_key_shares, private_key_share, chain_code, global_rid)?;
+            let output = Output::from_parts(
+                public_key_shares,
+                private_key_share,
+                global_chain_code,
+                global_rid,
+            )?;
             Ok(ProcessOutcome::Terminated(output))
         } else {
             // Otherwise, we'll have to wait for more round three messages.
@@ -587,11 +611,13 @@ impl KeygenParticipant {
 /// Generate a [`Transcript`] for [`PiSchProof`].
 fn schnorr_proof_transcript(
     sid: Identifier,
+    global_chain_code: &[u8; 32],
     global_rid: &[u8; 32],
     sender_id: ParticipantIdentifier,
 ) -> Result<Transcript> {
     let mut transcript = Transcript::new(b"keygen schnorr");
     transcript.append_message(b"sid", &serialize!(&sid)?);
+    transcript.append_message(b"chain_code", &serialize!(global_chain_code)?);
     transcript.append_message(b"rid", &serialize!(global_rid)?);
     transcript.append_message(b"sender_id", &serialize!(&sender_id)?);
     Ok(transcript)
