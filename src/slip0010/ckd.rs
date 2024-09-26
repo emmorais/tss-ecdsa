@@ -48,25 +48,21 @@ impl CKDInput {
 
     /// Derive a child key from this input.
     pub fn derive(&self) -> Scalar {
-        /*let mut data = [0u8; 37];
-        data[..33].copy_from_slice(&self.public_key.to_bytes());
-        data[33..].copy_from_slice(&self.index.to_be_bytes());
+        let mut shift_result = Scalar::ZERO;
+        let mut counter: u8 = 0;
 
-        let hmac = Hmac::<Sha256>::new_varkey(&self.chain_code)?;
-        let result = hmac.update(&data).finalize().into_bytes();
+        while shift_result.is_zero().into() {
+            let mut shift_input = Vec::new();
+            shift_input.extend(self.public_key.to_sec1_bytes().iter());
+            shift_input.extend(self.chain_code.to_vec());
+            shift_input.extend(self.index.to_le_bytes().to_vec());
+            shift_input.extend(counter.to_le_bytes().to_vec());
+            let shift = Keccak256::new_with_prefix(shift_input);
+            shift_result =
+                bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
+            counter += 1;
+        }
 
-        let mut child_public_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&result[..33])?;
-        let mut child_chain_code = [0u8; 32];
-        child_chain_code.copy_from_slice(&result[33..]);
-
-        Ok(Self::new(child_public_key, child_chain_code, self.index))*/
-
-        let mut shift_input = Vec::new();
-        shift_input.extend(self.public_key.to_sec1_bytes().iter());
-        shift_input.extend(self.chain_code.to_vec());
-        shift_input.extend(self.index.to_le_bytes().to_vec());
-
-        let shift = Keccak256::new_with_prefix(shift_input);
-        bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap()
+        shift_result
     }
 }
