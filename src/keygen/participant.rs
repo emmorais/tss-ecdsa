@@ -465,45 +465,31 @@ impl KeygenParticipant {
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
         info!("Generating round three keygen messages.");
 
-        // Construct `global chain_code` out of each participant's `chain_code`.
-        let chain_codes: Vec<[u8; 32]> = self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                let decom = self
-                    .local_storage
-                    .retrieve::<storage::Decommit>(other_participant_id)?;
-                Ok(decom.chain_code)
-            })
-            .collect::<Result<Vec<[u8; 32]>>>()?;
-        // Construct `global rid` out of each participant's `rid`s.
-        let rids: Vec<[u8; 32]> = self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                let decom = self
-                    .local_storage
-                    .retrieve::<storage::Decommit>(other_participant_id)?;
-                Ok(decom.rid)
-            })
-            .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
+
+        // Auxiliary macro to xor two 256-bit arrays given as Vectors of 32 bytes
+        macro_rules! xor_256_bits {
+            ($a:expr, $b:expr) => {{
+                let mut result = [0u8; 32];
+                for i in 0..32 {
+                    result[i] = $a[i] ^ $b[i];
+                }
+                result
+            }};
+        }
+
+        // Compute the global chain code and random identifier from individual
+        // contributions
         let mut global_chain_code = my_decom.chain_code;
         let mut global_rid = my_decom.rid;
-        // xor all the chain_codes together. In principle, many different options for
-        // combining these should be okay
-        for chain_code in chain_codes.iter() {
-            for i in 0..32 {
-                global_chain_code[i] ^= chain_code[i];
-            }
+        for &other_participant_id in self.other_participant_ids.iter() {
+            let decom = self
+                .local_storage
+                .retrieve::<storage::Decommit>(other_participant_id)?;
+            global_chain_code = xor_256_bits!(global_chain_code, decom.chain_code);
+            global_rid = xor_256_bits!(global_rid, decom.rid);
         }
-        // xor all the rids together. In principle, many different options for combining
-        // these should be okay
-        for rid in rids.iter() {
-            for i in 0..32 {
-                global_rid[i] ^= rid[i];
-            }
-        }
+
         self.local_storage
             .store::<storage::ChainCode>(self.id, global_chain_code);
         self.local_storage
