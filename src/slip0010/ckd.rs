@@ -3,7 +3,13 @@
 use crate::{errors::CallerError, utils::bn_to_scalar};
 use k256::{ecdsa::VerifyingKey, Scalar};
 use libpaillier::unknown_order::BigNumber;
-use sha3::{Digest, Keccak256};
+use hmac::Mac;
+use generic_array::{
+    typenum::{U32, U64},
+    GenericArray,
+};
+
+type HmacSha512 = hmac::Hmac<sha2::Sha512>;
 
 /// Represents the input to the CKD function.
 #[derive(Debug, Clone)]
@@ -57,12 +63,25 @@ impl CKDInput {
             shift_input.extend(self.chain_code.to_vec());
             shift_input.extend(self.index.to_le_bytes().to_vec());
             shift_input.extend(counter.to_le_bytes().to_vec());
-            let shift = Keccak256::new_with_prefix(shift_input);
+            
+            let hmac = HmacSha512::new_from_slice("Bitcoiun seed".as_bytes())
+                .expect("this never fails: hmac can handle keys of any size");
+            let i = hmac.clone().chain_update(shift_input).finalize().into_bytes(); 
+            let (i_left, _i_right) = Self::split_into_two_halfes(&i);
+            
+            let shift = i_left;
             shift_result =
-                bn_to_scalar(&BigNumber::from_slice(&shift.clone().finalize()[..])).unwrap();
+                bn_to_scalar(&BigNumber::from_slice(*shift)).unwrap();
             counter += 1;
         }
 
         shift_result
+    }
+    
+    /// Splits array `I` of 64 bytes into two arrays `I_L = I[..32]` and `I_R = I[32..]`
+    fn split_into_two_halfes(
+        i: &GenericArray<u8, U64>,
+    ) -> (&GenericArray<u8, U32>, &GenericArray<u8, U32>) {
+        generic_array::sequence::Split::split(i)
     }
 }
