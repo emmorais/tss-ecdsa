@@ -1183,7 +1183,8 @@ mod tests {
         let chain_code = first_output.chain_code();
 
         let shift_input = slip0010::ckd::CKDInput::new(saved_public_key, *chain_code, counter)?;
-        let shift_scalar = slip0010::ckd::CKDInput::derive(&shift_input);
+        // TODO: use as chain_code and create a proper field for the seed
+        let (shift_scalar, _master_chain_code) = slip0010::ckd::CKDInput::derive(&shift_input);
 
         // Make signing participants
         let mut sign_quorum = configs
