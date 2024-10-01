@@ -862,6 +862,9 @@ mod tests {
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3, 42).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(3, 2, 3, 42).is_ok());
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3, 42).is_ok());
+        // 2**31
+        let invalid_index = 1 << 31;
+        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3, invalid_index).is_err());
     }
 
     #[ignore]
@@ -1182,9 +1185,16 @@ mod tests {
 
         let chain_code = first_output.chain_code();
 
-        let shift_input = slip0010::ckd::CKDInput::new(saved_public_key, *chain_code, counter)?;
-        // TODO: use as chain_code and create a proper field for the seed
-        let (shift_scalar, _master_chain_code) = slip0010::ckd::CKDInput::derive(&shift_input);
+        let saved_public_key_bytes: Vec<u8> = saved_public_key.clone().to_sec1_bytes().to_vec();
+
+        let shift_input = slip0010::ckd::CKDInput::new(
+            None,
+            saved_public_key_bytes.to_vec(),
+            *chain_code,
+            counter,
+        )?;
+        let (shift_scalar, _chain_code_child) =
+            slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
 
         // Make signing participants
         let mut sign_quorum = configs

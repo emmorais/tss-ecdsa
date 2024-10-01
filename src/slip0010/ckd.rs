@@ -1,12 +1,15 @@
 //! Utilities for Child Key Derivation (CKD) according to SLIP-0010.
 
-use crate::{errors::CallerError, utils::bn_to_scalar};
+use crate::{
+    errors::CallerError,
+    utils::{bn_to_scalar, CurvePoint},
+};
 use generic_array::{
     typenum::{U32, U64},
     GenericArray,
 };
 use hmac::Mac;
-use k256::{ecdsa::VerifyingKey, Scalar};
+use k256::Scalar;
 use libpaillier::unknown_order::BigNumber;
 
 type HmacSha512 = hmac::Hmac<sha2::Sha512>;
@@ -14,32 +17,76 @@ type HmacSha512 = hmac::Hmac<sha2::Sha512>;
 /// Represents the input to the CKD function.
 #[derive(Debug, Clone)]
 pub struct CKDInput {
-    public_key: VerifyingKey,
+    private_key: Option<Scalar>,
+    public_key: Vec<u8>,
     chain_code: [u8; 32],
     index: u32,
+}
+
+/// Represents the output of the CKD function.
+#[derive(Debug, Clone)]
+pub struct CKDOutput {
+    /// The chain code.
+    pub chain_code: [u8; 32],
+    /// The scalar.
+    pub scalar: Scalar,
+}
+
+/// Represents the input to the master key derivation function.
+#[derive(Debug, Clone)]
+pub struct MasterKeyInput {
+    seed: Vec<u8>,
+    curve: String,
+}
+
+impl MasterKeyInput {
+    /// Create a new MasterKeyInput.
+    pub fn new(seed: &[u8], curve: String) -> Result<Self, CallerError> {
+        if curve != "Bitcoin seed" {
+            Err(CallerError::WrongCurve)
+        } else {
+            Ok(Self {
+                seed: seed.to_vec(),
+                curve,
+            })
+        }
+    }
+
+    /// Derive master key from seed.
+    pub fn derive_master_key(&self) -> CKDOutput {
+        let hmac = HmacSha512::new_from_slice(self.curve.as_bytes())
+            .expect("this never fails: hmac can handle keys of any size");
+        let i = hmac
+            .clone()
+            .chain_update(self.seed.clone())
+            .finalize()
+            .into_bytes();
+        let (i_left, i_right) = split_into_two_halfes(&i);
+        CKDOutput {
+            chain_code: (*i_right).into(),
+            scalar: bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
+        }
+    }
 }
 
 impl CKDInput {
     /// Create a new CKDInput.
     pub fn new(
-        public_key: VerifyingKey,
+        private_key: Option<Scalar>,
+        public_key: Vec<u8>,
         chain_code: [u8; 32],
         index: u32,
     ) -> Result<Self, CallerError> {
-        if index == 0 || index >= 0x80000000 {
+        if index >= 0x80000000 {
             Err(CallerError::WrongIndex)
         } else {
             Ok(Self {
+                private_key,
                 public_key,
                 chain_code,
                 index,
             })
         }
-    }
-
-    /// Get the public key.
-    pub fn public_key(&self) -> VerifyingKey {
-        self.public_key
     }
 
     /// Get the chain code.
@@ -52,56 +99,58 @@ impl CKDInput {
         self.index
     }
 
-    /// Derive master key from seed.
-    pub fn derive_master_key(seed: &[u8]) -> (Scalar, [u8; 32]) {
-        let hmac = HmacSha512::new_from_slice("Bitcoin seed".as_bytes())
+    /// Derives a shift for non-hardened child
+    pub fn derive_public_shift(&self) -> (Scalar, [u8; 32]) {
+        let hmac = HmacSha512::new_from_slice(&self.chain_code)
             .expect("this never fails: hmac can handle keys of any size");
-        let i = hmac.clone().chain_update(seed).finalize().into_bytes();
-        let (i_left, i_right) = Self::split_into_two_halfes(&i);
-        (
-            bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
-            (*i_right).into(),
-        )
+        let i = hmac
+            .clone()
+            .chain_update(self.public_key.as_slice())
+            .chain_update(self.index.to_be_bytes())
+            .finalize()
+            .into_bytes();
+        self.calculate_shift(&hmac, i)
     }
 
-    /// Derive a child key from this input.
-    pub fn derive(&self) -> (Scalar, [u8; 32]) {
-        let mut chain_code = [0u8; 32];
-        let mut shift_result = Scalar::ZERO;
-        let mut counter: u8 = 0;
+    fn calculate_shift(
+        &self,
+        hmac: &HmacSha512,
+        mut i: hmac::digest::Output<HmacSha512>,
+    ) -> (Scalar, [u8; 32]) {
+        loop {
+            let (i_left, i_right) = split_into_two_halfes(&i);
 
-        while shift_result.is_zero().into() {
-            let mut shift_input = Vec::new();
-            shift_input.extend(self.public_key.to_sec1_bytes().iter());
-            shift_input.extend(self.chain_code.to_vec());
-            shift_input.extend(self.index.to_le_bytes().to_vec());
-            shift_input.extend(counter.to_le_bytes().to_vec());
+            if let Ok(shift) = bn_to_scalar(&BigNumber::from_slice(i_left)) {
+                let parent_private_key: Scalar = self.private_key.unwrap_or(Scalar::ZERO);
+                let parent_public_key = CurvePoint::try_from_bytes(self.public_key.as_slice())
+                    .expect("could not get the parent public key");
 
-            let hmac = HmacSha512::new_from_slice("Bitcoin seed".as_bytes())
-                .expect("this never fails: hmac can handle keys of any size");
-            let i = hmac
+                let child_private_key = parent_private_key + shift;
+                let child_public_key =
+                    parent_public_key + CurvePoint::GENERATOR.multiply_by_scalar(&shift);
+
+                if child_public_key != CurvePoint::IDENTITY {
+                    return (child_private_key, (*i_right).into());
+                }
+            }
+
+            i = hmac
                 .clone()
-                .chain_update(shift_input)
+                .chain_update([0x01])
+                .chain_update(i_right)
+                .chain_update(self.index.to_be_bytes())
                 .finalize()
-                .into_bytes();
-            let (i_left, new_chain_code) = Self::split_into_two_halfes(&i);
-            chain_code = (*new_chain_code).into();
-
-            let shift = i_left;
-            shift_result = bn_to_scalar(&BigNumber::from_slice(*shift)).unwrap();
-            counter += 1;
+                .into_bytes()
         }
-
-        (shift_result, chain_code)
     }
+}
 
-    /// Splits array `I` of 64 bytes into two arrays `I_L = I[..32]` and `I_R =
-    /// I[32..]`
-    fn split_into_two_halfes(
-        i: &GenericArray<u8, U64>,
-    ) -> (&GenericArray<u8, U32>, &GenericArray<u8, U32>) {
-        generic_array::sequence::Split::split(i)
-    }
+/// Splits array `I` of 64 bytes into two arrays `I_L = I[..32]` and `I_R =
+/// I[32..]`
+fn split_into_two_halfes(
+    i: &GenericArray<u8, U64>,
+) -> (&GenericArray<u8, U32>, &GenericArray<u8, U32>) {
+    generic_array::sequence::Split::split(i)
 }
 
 // Unit tests
@@ -120,9 +169,10 @@ fn test_derive_master_key() {
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
         0x0f,
     ];
-    let (master_key, chain_code) = CKDInput::derive_master_key(&seed);
+    let mk_input = MasterKeyInput::new(&seed, "Bitcoin seed".into()).unwrap();
+    let master_key_output = MasterKeyInput::derive_master_key(&mk_input);
     assert_eq!(
-        master_key.to_bytes(),
+        master_key_output.scalar.to_bytes(),
         [
             0xe8, 0xf3, 0x2e, 0x72, 0x3d, 0xec, 0xf4, 0x05, 0x1a, 0xef, 0xac, 0x8e, 0x2c, 0x93,
             0xc9, 0xc5, 0xb2, 0x14, 0x31, 0x38, 0x17, 0xcd, 0xb0, 0x1a, 0x14, 0x94, 0xb9, 0x17,
@@ -131,11 +181,99 @@ fn test_derive_master_key() {
         .into()
     );
     assert_eq!(
-        chain_code,
+        master_key_output.chain_code,
         [
             0x87, 0x3d, 0xff, 0x81, 0xc0, 0x2f, 0x52, 0x56, 0x23, 0xfd, 0x1f, 0xe5, 0x16, 0x7e,
             0xac, 0x3a, 0x55, 0xa0, 0x49, 0xde, 0x3d, 0x31, 0x4b, 0xb4, 0x2e, 0xe2, 0x27, 0xff,
             0xed, 0x37, 0xd5, 0x08
         ]
+    );
+}
+
+/*
+Chain m/0
+chain code: f0909affaa7ee7abe5dd4e100598d4dc53cd709d5a5c2cac40e7412f232f7c9c
+private: abe74a98f6c7eabee0428f53798f0ab8aa1bd37873999041703c742f15ac7e1e
+public: 02fc9e5af0ac8d9b3cecfe2a888e2117ba3d089d8585886c9c826b6b22a98d12ea
+*/
+#[test]
+fn test_derive_child_key() {
+    // seed:
+    // fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542
+    let seed = [
+        0xff, 0xfc, 0xf9, 0xf6, 0xf3, 0xf0, 0xed, 0xea, 0xe7, 0xe4, 0xe1, 0xde, 0xdb, 0xd8, 0xd5,
+        0xd2, 0xcf, 0xcc, 0xc9, 0xc6, 0xc3, 0xc0, 0xbd, 0xba, 0xb7, 0xb4, 0xb1, 0xae, 0xab, 0xa8,
+        0xa5, 0xa2, 0x9f, 0x9c, 0x99, 0x96, 0x93, 0x90, 0x8d, 0x8a, 0x87, 0x84, 0x81, 0x7e, 0x7b,
+        0x78, 0x75, 0x72, 0x6f, 0x6c, 0x69, 0x66, 0x63, 0x60, 0x5d, 0x5a, 0x57, 0x54, 0x51, 0x4e,
+        0x4b, 0x48, 0x45, 0x42,
+    ];
+    let mk_input = MasterKeyInput::new(&seed, "Bitcoin seed".into()).unwrap();
+    let master_key_output = MasterKeyInput::derive_master_key(&mk_input);
+
+    // derive the child key
+    let pk = CurvePoint::GENERATOR.multiply_by_scalar(&master_key_output.scalar);
+    let private_key = master_key_output.scalar;
+    let public_key: Vec<u8> = pk.to_bytes().to_vec();
+
+    // The expected values are:
+    //chain code:   60499f801b896d83179a4374aeb7822aaeaceaa0db1f85ee3e904c4defbd9689
+    //private:      4b03d6fc340455b363f51020ad3ecca4f0850280cf436c70c727923f6db46c3e
+    //public:     03cbcaa9c98c877a26977d00825c956a238e8dddfbd322cce4f74b0b5bd6ace4a7
+
+    // assert the chain code
+    assert_eq!(
+        master_key_output.chain_code,
+        [
+            0x60, 0x49, 0x9f, 0x80, 0x1b, 0x89, 0x6d, 0x83, 0x17, 0x9a, 0x43, 0x74, 0xae, 0xb7,
+            0x82, 0x2a, 0xae, 0xac, 0xea, 0xa0, 0xdb, 0x1f, 0x85, 0xee, 0x3e, 0x90, 0x4c, 0x4d,
+            0xef, 0xbd, 0x96, 0x89
+        ]
+    );
+    // assert the private key
+    assert_eq!(
+        master_key_output.scalar.to_bytes(),
+        [
+            0x4b, 0x03, 0xd6, 0xfc, 0x34, 0x04, 0x55, 0xb3, 0x63, 0xf5, 0x10, 0x20, 0xad, 0x3e,
+            0xcc, 0xa4, 0xf0, 0x85, 0x02, 0x80, 0xcf, 0x43, 0x6c, 0x70, 0xc7, 0x27, 0x92, 0x3f,
+            0x6d, 0xb4, 0x6c, 0x3e
+        ]
+        .into()
+    );
+    // assert the public key
+    assert_eq!(
+        public_key,
+        [
+            0x03, 0xcb, 0xca, 0xa9, 0xc9, 0x8c, 0x87, 0x7a, 0x26, 0x97, 0x7d, 0x00, 0x82, 0x5c,
+            0x95, 0x6a, 0x23, 0x8e, 0x8d, 0xdd, 0xfb, 0xd3, 0x22, 0xcc, 0xe4, 0xf7, 0x4b, 0x0b,
+            0x5b, 0xd6, 0xac, 0xe4, 0xa7
+        ]
+    );
+
+    let ckd_input = CKDInput::new(
+        Some(private_key),
+        public_key,
+        master_key_output.chain_code,
+        0,
+    )
+    .unwrap();
+    let child_key_output = ckd_input.derive_public_shift();
+    // assert the chain code
+    assert_eq!(
+        child_key_output.1,
+        [
+            0xf0, 0x90, 0x9a, 0xff, 0xaa, 0x7e, 0xe7, 0xab, 0xe5, 0xdd, 0x4e, 0x10, 0x05, 0x98,
+            0xd4, 0xdc, 0x53, 0xcd, 0x70, 0x9d, 0x5a, 0x5c, 0x2c, 0xac, 0x40, 0xe7, 0x41, 0x2f,
+            0x23, 0x2f, 0x7c, 0x9c
+        ]
+    );
+    // assert the private key
+    assert_eq!(
+        child_key_output.0.to_bytes(),
+        [
+            0xab, 0xe7, 0x4a, 0x98, 0xf6, 0xc7, 0xea, 0xbe, 0xe0, 0x42, 0x8f, 0x53, 0x79, 0x8f,
+            0x0a, 0xb8, 0xaa, 0x1b, 0xd3, 0x78, 0x73, 0x99, 0x90, 0x41, 0x70, 0x3c, 0x74, 0x2f,
+            0x15, 0xac, 0x7e, 0x1e
+        ]
+        .into()
     );
 }
