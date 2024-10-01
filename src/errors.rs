@@ -63,6 +63,8 @@ pub enum CallerError {
     SignatureTrialRecoveryFailed,
     #[error("Received a wrong index for the key derivation")]
     WrongIndex,
+    #[error("Received a wrong curve description for the key derivation")]
+    WrongCurve,
 }
 
 macro_rules! serialize {

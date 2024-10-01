@@ -490,6 +490,8 @@ impl KeygenParticipant {
             global_rid = xor_256_bits!(global_rid, decom.rid);
         }
 
+        // TODO: the global chain_code is determined by the HMAC function, remove from
+        // here
         self.local_storage
             .store::<storage::ChainCode>(self.id, global_chain_code);
         self.local_storage
