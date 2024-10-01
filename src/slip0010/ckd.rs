@@ -216,9 +216,9 @@ fn test_derive_child_key() {
     let public_key: Vec<u8> = pk.to_bytes().to_vec();
 
     // The expected values are:
-    //chain code:   60499f801b896d83179a4374aeb7822aaeaceaa0db1f85ee3e904c4defbd9689
-    //private:      4b03d6fc340455b363f51020ad3ecca4f0850280cf436c70c727923f6db46c3e
-    //public:     03cbcaa9c98c877a26977d00825c956a238e8dddfbd322cce4f74b0b5bd6ace4a7
+    // chain code: 60499f801b896d83179a4374aeb7822aaeaceaa0db1f85ee3e904c4defbd9689
+    // private: 4b03d6fc340455b363f51020ad3ecca4f0850280cf436c70c727923f6db46c3e
+    // public: 03cbcaa9c98c877a26977d00825c956a238e8dddfbd322cce4f74b0b5bd6ace4a7
 
     // assert the chain code
     assert_eq!(
