@@ -883,7 +883,7 @@ mod tests {
         r: usize,
         t: usize,
         n: usize,
-        counter: u32,
+        child_index: u32,
     ) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_REAL = r; // The real quorum size, which is the number of participants that will actually
@@ -1191,10 +1191,10 @@ mod tests {
             None,
             saved_public_key_bytes.to_vec(),
             *chain_code,
-            counter,
+            child_index,
         )?;
-        let (shift_scalar, _chain_code_child) =
-            slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
+        let ckd_output = slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
+        let shift_scalar = ckd_output.private_key;
 
         // Make signing participants
         let mut sign_quorum = configs

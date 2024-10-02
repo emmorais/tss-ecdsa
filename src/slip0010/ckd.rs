@@ -29,7 +29,7 @@ pub struct CKDOutput {
     /// The chain code.
     pub chain_code: [u8; 32],
     /// The scalar.
-    pub scalar: Scalar,
+    pub private_key: Scalar,
 }
 
 /// Represents the input to the master key derivation function.
@@ -64,13 +64,16 @@ impl MasterKeyInput {
         let (i_left, i_right) = split_into_two_halfes(&i);
         CKDOutput {
             chain_code: (*i_right).into(),
-            scalar: bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
+            private_key: bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
         }
     }
 }
 
 impl CKDInput {
     /// Create a new CKDInput.
+    /// If the purpose is to for non-threshold key generation, the private key
+    /// should be provided. If the purpose is for threshold key generation,
+    /// the private key should be None.
     pub fn new(
         private_key: Option<Scalar>,
         public_key: Vec<u8>,
@@ -100,7 +103,7 @@ impl CKDInput {
     }
 
     /// Derives a shift for non-hardened child
-    pub fn derive_public_shift(&self) -> (Scalar, [u8; 32]) {
+    pub fn derive_public_shift(&self) -> CKDOutput {
         let hmac = HmacSha512::new_from_slice(&self.chain_code)
             .expect("this never fails: hmac can handle keys of any size");
         let i = hmac
@@ -116,7 +119,7 @@ impl CKDInput {
         &self,
         hmac: &HmacSha512,
         mut i: hmac::digest::Output<HmacSha512>,
-    ) -> (Scalar, [u8; 32]) {
+    ) -> CKDOutput {
         loop {
             let (i_left, i_right) = split_into_two_halfes(&i);
 
@@ -130,7 +133,10 @@ impl CKDInput {
                     parent_public_key + CurvePoint::GENERATOR.multiply_by_scalar(&shift);
 
                 if child_public_key != CurvePoint::IDENTITY {
-                    return (child_private_key, (*i_right).into());
+                    return CKDOutput {
+                        private_key: child_private_key,
+                        chain_code: (*i_right).into(),
+                    };
                 }
             }
 
@@ -172,7 +178,7 @@ fn test_derive_master_key() {
     let mk_input = MasterKeyInput::new(&seed, "Bitcoin seed".into()).unwrap();
     let master_key_output = MasterKeyInput::derive_master_key(&mk_input);
     assert_eq!(
-        master_key_output.scalar.to_bytes(),
+        master_key_output.private_key.to_bytes(),
         [
             0xe8, 0xf3, 0x2e, 0x72, 0x3d, 0xec, 0xf4, 0x05, 0x1a, 0xef, 0xac, 0x8e, 0x2c, 0x93,
             0xc9, 0xc5, 0xb2, 0x14, 0x31, 0x38, 0x17, 0xcd, 0xb0, 0x1a, 0x14, 0x94, 0xb9, 0x17,
@@ -211,8 +217,8 @@ fn test_derive_child_key() {
     let master_key_output = MasterKeyInput::derive_master_key(&mk_input);
 
     // derive the child key
-    let pk = CurvePoint::GENERATOR.multiply_by_scalar(&master_key_output.scalar);
-    let private_key = master_key_output.scalar;
+    let pk = CurvePoint::GENERATOR.multiply_by_scalar(&master_key_output.private_key);
+    let private_key = master_key_output.private_key;
     let public_key: Vec<u8> = pk.to_bytes().to_vec();
 
     // The expected values are:
@@ -231,7 +237,7 @@ fn test_derive_child_key() {
     );
     // assert the private key
     assert_eq!(
-        master_key_output.scalar.to_bytes(),
+        master_key_output.private_key.to_bytes(),
         [
             0x4b, 0x03, 0xd6, 0xfc, 0x34, 0x04, 0x55, 0xb3, 0x63, 0xf5, 0x10, 0x20, 0xad, 0x3e,
             0xcc, 0xa4, 0xf0, 0x85, 0x02, 0x80, 0xcf, 0x43, 0x6c, 0x70, 0xc7, 0x27, 0x92, 0x3f,
@@ -259,7 +265,7 @@ fn test_derive_child_key() {
     let child_key_output = ckd_input.derive_public_shift();
     // assert the chain code
     assert_eq!(
-        child_key_output.1,
+        child_key_output.chain_code,
         [
             0xf0, 0x90, 0x9a, 0xff, 0xaa, 0x7e, 0xe7, 0xab, 0xe5, 0xdd, 0x4e, 0x10, 0x05, 0x98,
             0xd4, 0xdc, 0x53, 0xcd, 0x70, 0x9d, 0x5a, 0x5c, 0x2c, 0xac, 0x40, 0xe7, 0x41, 0x2f,
@@ -268,12 +274,11 @@ fn test_derive_child_key() {
     );
     // assert the private key
     assert_eq!(
-        child_key_output.0.to_bytes(),
+        child_key_output.private_key.to_bytes().as_slice(),
         [
             0xab, 0xe7, 0x4a, 0x98, 0xf6, 0xc7, 0xea, 0xbe, 0xe0, 0x42, 0x8f, 0x53, 0x79, 0x8f,
             0x0a, 0xb8, 0xaa, 0x1b, 0xd3, 0x78, 0x73, 0x99, 0x90, 0x41, 0x70, 0x3c, 0x74, 0x2f,
             0x15, 0xac, 0x7e, 0x1e
         ]
-        .into()
     );
 }
