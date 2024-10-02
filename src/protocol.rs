@@ -829,7 +829,7 @@ mod tests {
         assert!(full_protocol_execution_with_noninteractive_signing_works(invalid_index).is_err());
     }
 
-    fn full_protocol_execution_with_noninteractive_signing_works(counter: u32) -> Result<()> {
+    fn full_protocol_execution_with_noninteractive_signing_works(child_index: u32) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
         // Set GLOBAL config for participants
@@ -1002,10 +1002,10 @@ mod tests {
             None,
             saved_public_key_bytes.to_vec(),
             *chain_code,
-            counter,
+            child_index,
         )?;
-        let (shift_scalar, _chain_code_child) =
-            slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
+        let ckd_output = slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
+        let shift_scalar = ckd_output.private_key;
 
         // Make signing participants
         let mut sign_quorum = configs
