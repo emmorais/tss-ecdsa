@@ -49,17 +49,3 @@ impl std::ops::Add<SignatureShare> for Scalar {
         self + rhs.0
     }
 }
-
-impl std::ops::Mul<SignatureShare> for SignatureShare {
-    type Output = Scalar;
-    fn mul(self, rhs: SignatureShare) -> Self::Output {
-        self.0 * rhs.0
-    }
-}
-
-impl std::ops::Mul<SignatureShare> for Scalar {
-    type Output = Scalar;
-    fn mul(self, rhs: SignatureShare) -> Self::Output {
-        self * rhs.0
-    }
-}
