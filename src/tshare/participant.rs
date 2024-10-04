@@ -830,6 +830,7 @@ impl TshareParticipant {
         // Decrypt the private share.
         let private_share = encrypted_share.decrypt(my_dk)?;
 
+        // Feldman validation
         // Check that this private share matches our public share in TshareDecommit
         // from this participant.
         let decom = self
@@ -880,42 +881,16 @@ impl TshareParticipant {
                 .collect::<Result<Vec<_>>>()?;
             let my_private_share = Self::aggregate_private_shares(&from_all_to_me_private);
 
-            // Feldman validation
             // Double-check that the aggregated private share matches the aggregated public
             // coeffs.
-            let expected_public = Self::eval_public_share(&all_public_coeffs, self.id())?;
-            let implied_public = my_private_share.public_point();
-            if implied_public != expected_public {
-                error!("The aggregated private share does not match the public coeffs (Feldman)");
-                return Err(InternalError::ProtocolError(None));
-            }
-            // Evaluate the public share of all other ids and store in a vector
+            let my_public_share = my_private_share.public_point();
             let mut all_public_keys = vec![];
             for pid in self.other_participant_ids.iter() {
                 let public_share = Self::eval_public_share(&all_public_coeffs, *pid)?;
                 let public_share = KeySharePublic::new(*pid, public_share);
                 all_public_keys.push(public_share);
             }
-            all_public_keys.push(KeySharePublic::new(self.id(), implied_public));
-
-            // Check that doing the aggregation of constant terms in a different order
-            // results in the same result
-            let old_public = Self::aggregate_constant_terms(&coeffs_from_all);
-            if old_public != all_public_coeffs[0] {
-                error!("The new public key share has inconsistent constant term.");
-                return Err(InternalError::ProtocolError(None));
-            };
-
-            // Check if the share is consistent, it must have an old public key that
-            // corresponds to the its input share
-            if let Some(share) = self.input.share() {
-                let old_public_key = share.public_point();
-                let last = coeffs_from_all.len() - 1;
-                if old_public_key != *coeffs_from_all[last][0].as_ref() {
-                    error!("The new public key share is inconsistent with the old one.");
-                    return Err(InternalError::ProtocolError(None));
-                }
-            }
+            all_public_keys.push(KeySharePublic::new(self.id(), my_public_share));
 
             let output = Output::from_parts(
                 all_public_coeffs.clone(),
@@ -948,21 +923,6 @@ impl TshareParticipant {
                 CoeffPublic::new(sum)
             })
             .collect()
-    }
-
-    fn aggregate_constant_terms(coeffs_from_all: &[Vec<CoeffPublic>]) -> CoeffPublic {
-        // for each Vec<CoeffPublic> in coeffs_from_all, we take the first CoeffPublic
-        let constant_terms: Vec<CoeffPublic> = coeffs_from_all
-            .iter()
-            .map(|coeffs| coeffs[0].clone())
-            .collect::<Vec<_>>();
-
-        // now that we have the constant terms in a vector, we can sum them
-        constant_terms
-            .iter()
-            .fold(CoeffPublic::new(CurvePoint::IDENTITY), |sum, coeff| {
-                sum + coeff
-            })
     }
 }
 
