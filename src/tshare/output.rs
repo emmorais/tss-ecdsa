@@ -69,9 +69,8 @@ impl Output {
     /// should not try to form public and private key shares independently.
     ///
     /// The provided components must satisfy the following properties:
-    /// - Validity of private key share can be checked using Feldman's VSS,
-    /// but since the id is not known, it must be tested by the caller
-    /// - The public key shares must be from a unique set of participants
+    /// - Validity of private key share can be checked using Feldman's VSS.
+    /// - The public key shares must be from a unique set of participants.
     pub fn from_parts(
         public_coeffs: Vec<CoeffPublic>,
         public_keys: Vec<KeySharePublic>,
