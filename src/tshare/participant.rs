@@ -1,4 +1,3 @@
-
 //! Types and functions related to the key refresh sub-protocol Participant.
 
 // Copyright (c) Facebook, Inc. and its affiliates.
