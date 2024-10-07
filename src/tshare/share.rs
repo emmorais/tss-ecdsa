@@ -90,6 +90,8 @@ impl Debug for CoeffPrivate {
 
 /// Represents a coefficient of a polynomial.
 /// Coefficients and Evaluations are represented as curve scalars.
+/// The input shares are interpreted as coefficients, while the output shares
+/// are interpreted as evaluations.
 impl CoeffPrivate {
     /// Sample a private key share uniformly at random.
     pub(crate) fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
@@ -109,6 +111,8 @@ impl CoeffPrivate {
 
 /// Represents an evaluation of a polynomial at a given point.
 /// Coefficients and Evaluations are represented as curve scalars.
+/// The input shares are interpreted as coefficients, while the output shares
+/// are interpreted as evaluations.
 impl EvalPrivate {
     /// Sample a private key share uniformly at random.
     pub fn random(rng: &mut (impl CryptoRng + RngCore)) -> Self {
