@@ -69,10 +69,7 @@ impl TshareDecommit {
     }
 
     /// Deserialize a TshareDecommit from a message and verify it.
-    pub(crate) fn from_message(
-        message: &Message,
-        com: &TshareCommit,
-    ) -> Result<Self> {
+    pub(crate) fn from_message(message: &Message, com: &TshareCommit) -> Result<Self> {
         message.check_type(MessageType::Tshare(TshareMessageType::R2Decommit))?;
         let tshare_decommit: TshareDecommit = deserialize!(&message.unverified_bytes)?;
         tshare_decommit.verify(message.id(), message.from(), com)?;

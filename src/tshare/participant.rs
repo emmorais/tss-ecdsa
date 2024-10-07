@@ -1,64 +1,76 @@
-    //! Types and functions related to the key refresh sub-protocol Participant.
 
-    // Copyright (c) Facebook, Inc. and its affiliates.
-    // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
-    //
-    // This source code is licensed under both the MIT license found in the
-    // LICENSE-MIT file in the root directory of this source tree and the Apache
-    // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
-    // of this source tree.
+//! Types and functions related to the key refresh sub-protocol Participant.
 
-    use std::collections::HashMap;
+// Copyright (c) Facebook, Inc. and its affiliates.
+// Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
+//
+// This source code is licensed under both the MIT license found in the
+// LICENSE-MIT file in the root directory of this source tree and the Apache
+// License, Version 2.0 found in the LICENSE-APACHE file in the root directory
+// of this source tree.
 
-    use super::{
-        commit::{TshareCommit, TshareDecommit},
-        share::{CoeffPrivate, CoeffPublic, EvalEncrypted, EvalPrivate},
-    };
-    use crate::{
-        broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag}, errors::{CallerError, InternalError, Result}, keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant}, local_storage::LocalStorage, messages::{Message, MessageType, TshareMessageType}, participant::{
-            Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
-        }, protocol::{ParticipantIdentifier, ProtocolType, SharedContext}, run_only_once, tshare::share::EvalPublic, utils::{bn_to_scalar, scalar_to_bn, CurvePoint}, zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret}, Identifier, ParticipantConfig
-    };
+use std::collections::HashMap;
 
-    use k256::{elliptic_curve::PrimeField, Scalar};
-    use libpaillier::unknown_order::BigNumber;
-    use merlin::Transcript;
-    use rand::{CryptoRng, RngCore};
-    use tracing::{error, info, instrument, warn};
+use super::{
+    commit::{TshareCommit, TshareDecommit},
+    share::{CoeffPrivate, CoeffPublic, EvalEncrypted, EvalPrivate},
+};
+use crate::{
+    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
+    errors::{CallerError, InternalError, Result},
+    keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant},
+    local_storage::LocalStorage,
+    messages::{Message, MessageType, TshareMessageType},
+    participant::{
+        Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
+    },
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
+    run_only_once,
+    tshare::share::EvalPublic,
+    utils::{bn_to_scalar, scalar_to_bn, CurvePoint},
+    zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
+    Identifier, ParticipantConfig,
+};
 
-    use super::{input::Input, output::Output};
+use k256::{elliptic_curve::PrimeField, Scalar};
+use libpaillier::unknown_order::BigNumber;
+use merlin::Transcript;
+use rand::{CryptoRng, RngCore};
+use tracing::{error, info, instrument, warn};
 
-    mod storage {
-        use super::*;
-        use crate::{local_storage::TypeTag, tshare::share::EvalPublic};
+use super::{input::Input, output::Output};
 
-        pub(super) struct Commit;
-        impl TypeTag for Commit {
-            type Value = TshareCommit;
-        }
-        pub(super) struct Decommit;
-        impl TypeTag for Decommit {
-            type Value = TshareDecommit;
-        }
-        pub(super) struct SchnorrPrecom;
-        impl TypeTag for SchnorrPrecom {
-            type Value = PiSchPrecommit;
-        }
-        pub(super) struct GlobalRid;
-        impl TypeTag for GlobalRid {
-            type Value = [u8; 32];
-        }
-        pub(super) struct PrivateCoeffs;
-        impl TypeTag for PrivateCoeffs {
-            type Value = Vec<super::CoeffPrivate>;
-        }
-        pub(super) struct PublicCoeffs;
-        impl TypeTag for PublicCoeffs {
-            type Value = Vec<super::CoeffPublic>;
-        }
-        pub(super) struct ValidPublicShare;
-        impl TypeTag for ValidPublicShare {
-            type Value = EvalPublic;
+mod storage {
+    use super::*;
+    use crate::{local_storage::TypeTag, tshare::share::EvalPublic};
+
+    pub(super) struct Commit;
+    impl TypeTag for Commit {
+        type Value = TshareCommit;
+    }
+    pub(super) struct Decommit;
+    impl TypeTag for Decommit {
+        type Value = TshareDecommit;
+    }
+    pub(super) struct SchnorrPrecom;
+    impl TypeTag for SchnorrPrecom {
+        type Value = PiSchPrecommit;
+    }
+    pub(super) struct GlobalRid;
+    impl TypeTag for GlobalRid {
+        type Value = [u8; 32];
+    }
+    pub(super) struct PrivateCoeffs;
+    impl TypeTag for PrivateCoeffs {
+        type Value = Vec<super::CoeffPrivate>;
+    }
+    pub(super) struct PublicCoeffs;
+    impl TypeTag for PublicCoeffs {
+        type Value = Vec<super::CoeffPublic>;
+    }
+    pub(super) struct ValidPublicShare;
+    impl TypeTag for ValidPublicShare {
+        type Value = EvalPublic;
     }
     pub(super) struct ValidPrivateEval;
     impl TypeTag for ValidPrivateEval {
@@ -187,9 +199,7 @@ impl ProtocolParticipant for TshareParticipant {
             MessageType::Tshare(TshareMessageType::R2Decommit) => {
                 self.handle_round_two_msg(rng, message)
             }
-            MessageType::Tshare(TshareMessageType::R3Proof) => {
-                self.handle_round_three_msg(message)
-            }
+            MessageType::Tshare(TshareMessageType::R3Proof) => self.handle_round_three_msg(message),
             MessageType::Tshare(TshareMessageType::R3PrivateShare) => {
                 self.handle_round_three_msg_private(message)
             }
@@ -287,7 +297,6 @@ impl TshareParticipant {
             (privates, publics)
         };
 
-
         // Generate proof precommitments.
         let sch_precom = PiSchProof::precommit(rng)?;
 
@@ -322,7 +331,7 @@ impl TshareParticipant {
         // Store the private coeffs from us to others so we can share them later.
         self.local_storage
             .store::<storage::PrivateCoeffs>(self.id(), coeff_privates);
-        
+
         // Store the public coeffs from us to others so we can share them later.
         self.local_storage
             .store::<storage::PublicCoeffs>(self.id(), coeff_publics);
@@ -555,7 +564,7 @@ impl TshareParticipant {
         let private_coeffs = self
             .local_storage
             .retrieve::<storage::PrivateCoeffs>(self.id())?;
-        
+
         let my_private_share = self
             .local_storage
             .retrieve::<storage::ValidPrivateEval>(self.id())?;
@@ -571,7 +580,6 @@ impl TshareParticipant {
             &ProverSecret::new(&scalar_to_bn(sk)),
             &transcript,
         )?;
-
 
         // Encrypt the private shares to each participant.
         let encrypted_shares = self
@@ -785,10 +793,7 @@ impl TshareParticipant {
 
         // Only if the proof verifies do we store the participant's shares.
         self.local_storage
-            .store_once::<storage::ValidPublicShare>(
-                message.from(),
-                decom.public_share.clone(),
-            )?;
+            .store_once::<storage::ValidPublicShare>(message.from(), decom.public_share.clone())?;
 
         self.maybe_finish()
     }
@@ -864,10 +869,7 @@ impl TshareParticipant {
             let coeffs_from_all = self
                 .all_participants()
                 .iter()
-                .map(|pid| {
-                    self.local_storage
-                        .remove::<storage::PublicCoeffs>(*pid)
-                })
+                .map(|pid| self.local_storage.remove::<storage::PublicCoeffs>(*pid))
                 .collect::<Result<Vec<_>>>()?;
             let all_public_coeffs = Self::aggregate_public_coeffs(&coeffs_from_all);
 
