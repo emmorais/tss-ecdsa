@@ -58,7 +58,7 @@ pub(crate) struct PiSchProof {
 /// Implementation note: this type includes the mask itself. This is for
 /// convenience; the mask must not be sent to the verifier at any point as this
 /// breaks the security of the proof.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct PiSchPrecommit {
     /// Precommitment value (`A` in the paper).
     precommitment: CurvePoint,
@@ -219,10 +219,7 @@ impl PiSchProof {
 
     // Deserialize multiple proofs from a single message.
     pub(crate) fn from_message_multi(message: &Message) -> Result<Vec<Self>> {
-        message.check_one_of_type(&[
-            MessageType::Keyrefresh(KeyrefreshMessageType::R3Proofs),
-            MessageType::Tshare(TshareMessageType::R3Proofs),
-        ])?;
+        message.check_type(MessageType::Keyrefresh(KeyrefreshMessageType::R3Proofs))?;
 
         let pisch_proofs: Vec<PiSchProof> = deserialize!(&message.unverified_bytes)?;
         for pisch_proof in &pisch_proofs {
@@ -239,7 +236,10 @@ impl PiSchProof {
     }
 
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
-        message.check_type(MessageType::Keygen(KeygenMessageType::R3Proof))?;
+        message.check_one_of_type(&[
+            MessageType::Keygen(KeygenMessageType::R3Proof),
+            MessageType::Tshare(TshareMessageType::R3Proof),
+        ])?;
 
         let pisch_proof: PiSchProof = deserialize!(&message.unverified_bytes)?;
         if pisch_proof.challenge >= k256_order() {

@@ -1,70 +1,64 @@
-//! Types and functions related to the key refresh sub-protocol Participant.
+    //! Types and functions related to the key refresh sub-protocol Participant.
 
-// Copyright (c) Facebook, Inc. and its affiliates.
-// Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
-//
-// This source code is licensed under both the MIT license found in the
-// LICENSE-MIT file in the root directory of this source tree and the Apache
-// License, Version 2.0 found in the LICENSE-APACHE file in the root directory
-// of this source tree.
+    // Copyright (c) Facebook, Inc. and its affiliates.
+    // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
+    //
+    // This source code is licensed under both the MIT license found in the
+    // LICENSE-MIT file in the root directory of this source tree and the Apache
+    // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
+    // of this source tree.
 
-use std::collections::HashMap;
+    use std::collections::HashMap;
 
-use super::{
-    commit::{TshareCommit, TshareDecommit},
-    share::{CoeffPrivate, CoeffPublic, EvalEncrypted, EvalPrivate},
-};
-use crate::{
-    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
-    errors::{CallerError, InternalError, Result},
-    keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant},
-    local_storage::LocalStorage,
-    messages::{Message, MessageType, TshareMessageType},
-    participant::{
-        Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
-    },
-    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
-    run_only_once,
-    utils::{bn_to_scalar, scalar_to_bn, CurvePoint},
-    zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
-    Identifier, ParticipantConfig,
-};
+    use super::{
+        commit::{TshareCommit, TshareDecommit},
+        share::{CoeffPrivate, CoeffPublic, EvalEncrypted, EvalPrivate},
+    };
+    use crate::{
+        broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag}, errors::{CallerError, InternalError, Result}, keygen::{KeySharePrivate, KeySharePublic, KeygenParticipant}, local_storage::LocalStorage, messages::{Message, MessageType, TshareMessageType}, participant::{
+            Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
+        }, protocol::{ParticipantIdentifier, ProtocolType, SharedContext}, run_only_once, tshare::share::EvalPublic, utils::{bn_to_scalar, scalar_to_bn, CurvePoint}, zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret}, Identifier, ParticipantConfig
+    };
 
-use k256::{elliptic_curve::PrimeField, Scalar};
-use libpaillier::unknown_order::BigNumber;
-use merlin::Transcript;
-use rand::{CryptoRng, RngCore};
-use tracing::{error, info, instrument, warn};
+    use k256::{elliptic_curve::PrimeField, Scalar};
+    use libpaillier::unknown_order::BigNumber;
+    use merlin::Transcript;
+    use rand::{CryptoRng, RngCore};
+    use tracing::{error, info, instrument, warn};
 
-use super::{input::Input, output::Output};
+    use super::{input::Input, output::Output};
 
-mod storage {
-    use super::*;
-    use crate::local_storage::TypeTag;
+    mod storage {
+        use super::*;
+        use crate::{local_storage::TypeTag, tshare::share::EvalPublic};
 
-    pub(super) struct Commit;
-    impl TypeTag for Commit {
-        type Value = TshareCommit;
-    }
-    pub(super) struct Decommit;
-    impl TypeTag for Decommit {
-        type Value = TshareDecommit;
-    }
-    pub(super) struct VecSchnorrPrecom;
-    impl TypeTag for VecSchnorrPrecom {
-        type Value = Vec<PiSchPrecommit>;
-    }
-    pub(super) struct GlobalRid;
-    impl TypeTag for GlobalRid {
-        type Value = [u8; 32];
-    }
-    pub(super) struct PrivateCoeffs;
-    impl TypeTag for PrivateCoeffs {
-        type Value = Vec<super::CoeffPrivate>;
-    }
-    pub(super) struct ValidPublicCoeffs;
-    impl TypeTag for ValidPublicCoeffs {
-        type Value = Vec<super::CoeffPublic>;
+        pub(super) struct Commit;
+        impl TypeTag for Commit {
+            type Value = TshareCommit;
+        }
+        pub(super) struct Decommit;
+        impl TypeTag for Decommit {
+            type Value = TshareDecommit;
+        }
+        pub(super) struct SchnorrPrecom;
+        impl TypeTag for SchnorrPrecom {
+            type Value = PiSchPrecommit;
+        }
+        pub(super) struct GlobalRid;
+        impl TypeTag for GlobalRid {
+            type Value = [u8; 32];
+        }
+        pub(super) struct PrivateCoeffs;
+        impl TypeTag for PrivateCoeffs {
+            type Value = Vec<super::CoeffPrivate>;
+        }
+        pub(super) struct PublicCoeffs;
+        impl TypeTag for PublicCoeffs {
+            type Value = Vec<super::CoeffPublic>;
+        }
+        pub(super) struct ValidPublicShare;
+        impl TypeTag for ValidPublicShare {
+            type Value = EvalPublic;
     }
     pub(super) struct ValidPrivateEval;
     impl TypeTag for ValidPrivateEval {
@@ -193,7 +187,7 @@ impl ProtocolParticipant for TshareParticipant {
             MessageType::Tshare(TshareMessageType::R2Decommit) => {
                 self.handle_round_two_msg(rng, message)
             }
-            MessageType::Tshare(TshareMessageType::R3Proofs) => {
+            MessageType::Tshare(TshareMessageType::R3Proof) => {
                 self.handle_round_three_msg(message)
             }
             MessageType::Tshare(TshareMessageType::R3PrivateShare) => {
@@ -293,29 +287,13 @@ impl TshareParticipant {
             (privates, publics)
         };
 
-        // Generate proof precommitments.
-        let sch_precoms = (0..coeff_publics.len())
-            .map(|_| PiSchProof::precommit(rng))
-            .collect::<Result<Vec<_>>>()?;
 
-        let decom = TshareDecommit::new(
-            rng,
-            &sid,
-            &self.id(),
-            coeff_publics,
-            sch_precoms
-                .iter()
-                .map(|sch_precom| *sch_precom.precommitment())
-                .collect(),
-        );
+        // Generate proof precommitments.
+        let sch_precom = PiSchProof::precommit(rng)?;
 
         // Store the beginning of our proofs so we can continue the proofs later.
         self.local_storage
-            .store::<storage::VecSchnorrPrecom>(self.id(), sch_precoms);
-
-        // Mark our own public shares as verified.
-        self.local_storage
-            .store::<storage::ValidPublicCoeffs>(self.id(), decom.coeff_publics.clone());
+            .store::<storage::SchnorrPrecom>(self.id(), sch_precom.clone());
 
         // Store the private share from ourselves to ourselves.
         let my_private_share = Self::eval_private_share(&coeff_privates, self.id());
@@ -324,11 +302,30 @@ impl TshareParticipant {
             assert_eq!(my_contant_term, private.x);
         }
         self.local_storage
-            .store::<storage::ValidPrivateEval>(self.id(), my_private_share);
+            .store::<storage::ValidPrivateEval>(self.id(), my_private_share.clone());
+
+        let public_share = EvalPublic::new(my_private_share.public_point());
+
+        let decom = TshareDecommit::new(
+            rng,
+            &sid,
+            &self.id(),
+            public_share,
+            &coeff_publics,
+            *sch_precom.precommitment(),
+        );
+
+        // Mark our own public shares as verified.
+        self.local_storage
+            .store::<storage::ValidPublicShare>(self.id(), decom.public_share.clone());
 
         // Store the private coeffs from us to others so we can share them later.
         self.local_storage
             .store::<storage::PrivateCoeffs>(self.id(), coeff_privates);
+        
+        // Store the public coeffs from us to others so we can share them later.
+        self.local_storage
+            .store::<storage::PublicCoeffs>(self.id(), coeff_publics);
 
         let com = decom.commit()?;
         let com_bytes = serialize!(&com)?;
@@ -472,7 +469,7 @@ impl TshareParticipant {
         let com = self
             .local_storage
             .retrieve::<storage::Commit>(message.from())?;
-        let decom = TshareDecommit::from_message(message, com, self.input.threshold())?;
+        let decom = TshareDecommit::from_message(message, com)?;
         self.local_storage
             .store_once::<storage::Decommit>(message.from(), decom)?;
 
@@ -487,7 +484,7 @@ impl TshareParticipant {
 
             // ...and handle any messages that other participants have sent for round 3.
             let mut round_three_outcomes = self
-                .fetch_messages(MessageType::Tshare(TshareMessageType::R3Proofs))?
+                .fetch_messages(MessageType::Tshare(TshareMessageType::R3Proof))?
                 .iter()
                 .map(|msg| self.handle_round_three_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
@@ -551,31 +548,30 @@ impl TshareParticipant {
         let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
 
         // Generate proofs for each share.
-        let precoms = self
+        let precom = self
             .local_storage
-            .retrieve::<storage::VecSchnorrPrecom>(self.id())?;
+            .retrieve::<storage::SchnorrPrecom>(self.id())?;
 
         let private_coeffs = self
             .local_storage
             .retrieve::<storage::PrivateCoeffs>(self.id())?;
+        
+        let my_private_share = self
+            .local_storage
+            .retrieve::<storage::ValidPrivateEval>(self.id())?;
 
-        let mut proofs: Vec<PiSchProof> = vec![];
-        for i in 0..precoms.len() {
-            let pk = &decom.coeff_publics[i];
-            let input = CommonInput::new(pk);
-            let precom = &precoms[i];
-            let sk = &private_coeffs[i];
+        let pk = &decom.public_share;
+        let input = CommonInput::new(pk);
+        let sk = &my_private_share.x;
 
-            let proof = PiSchProof::prove_from_precommit(
-                &self.retrieve_context(),
-                precom,
-                &input,
-                &ProverSecret::new(&scalar_to_bn(sk.as_ref())),
-                &transcript,
-            )?;
+        let proof = PiSchProof::prove_from_precommit(
+            &self.retrieve_context(),
+            precom,
+            &input,
+            &ProverSecret::new(&scalar_to_bn(sk)),
+            &transcript,
+        )?;
 
-            proofs.push(proof);
-        }
 
         // Encrypt the private shares to each participant.
         let encrypted_shares = self
@@ -591,8 +587,8 @@ impl TshareParticipant {
 
         // Send all proofs to everybody.
         let mut messages = self.message_for_other_participants(
-            MessageType::Tshare(TshareMessageType::R3Proofs),
-            proofs,
+            MessageType::Tshare(TshareMessageType::R3Proof),
+            proof,
         )?;
 
         // Send their private shares to each individual participant.
@@ -755,7 +751,7 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        self.check_for_duplicate_msg::<storage::ValidPublicCoeffs>(message.from())?;
+        self.check_for_duplicate_msg::<storage::ValidPublicShare>(message.from())?;
 
         if !self.can_handle_round_three_msg() {
             info!("Not yet ready to handle round three tshare broadcast message.");
@@ -768,36 +764,30 @@ impl TshareParticipant {
             .local_storage
             .retrieve::<storage::GlobalRid>(self.id())?;
 
-        let proofs = PiSchProof::from_message_multi(message)?;
+        let proof = PiSchProof::from_message(message)?;
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
 
-        // Check that there is one proof per coeff.
-        if proofs.len() != decom.coeff_publics.len() {
-            error!("Received incorrect number of proofs",);
-            return Err(InternalError::ProtocolError(Some(message.from())));
-        }
-
-        for ((proof, precommit), public_share) in proofs
-            .into_iter()
-            .zip(decom.As.iter())
-            .zip(decom.coeff_publics.iter())
-        {
-            let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
-            proof.verify_with_precommit(
-                CommonInput::new(public_share),
-                &self.retrieve_context(),
-                &mut transcript,
-                precommit,
-            )?;
-        }
+        //for ((proof, precommit), public_share) in proof
+        //    .into_iter()
+        //    .zip(decom.A.iter())
+        //    .zip(decom.public_share.iter())
+        //{
+        let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
+        proof.verify_with_precommit(
+            CommonInput::new(&decom.public_share),
+            &self.retrieve_context(),
+            &mut transcript,
+            &decom.A,
+        )?;
+        //}
 
         // Only if the proof verifies do we store the participant's shares.
         self.local_storage
-            .store_once::<storage::ValidPublicCoeffs>(
+            .store_once::<storage::ValidPublicShare>(
                 message.from(),
-                decom.coeff_publics.clone(),
+                decom.public_share.clone(),
             )?;
 
         self.maybe_finish()
@@ -824,6 +814,11 @@ impl TshareParticipant {
         message.check_type(MessageType::Tshare(TshareMessageType::R3PrivateShare))?;
         let encrypted_share: EvalEncrypted = deserialize!(&message.unverified_bytes)?;
 
+        // Get public coefficients from storage
+        //let coeffs_public = self
+        //    .local_storage
+        //    .retrieve::<storage::PublicCoeffs>(self.id())?;
+
         // Get my private key from the AuxInfo protocol.
         let my_dk = self.input.private_auxinfo().decryption_key();
 
@@ -836,7 +831,8 @@ impl TshareParticipant {
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
-        let expected_public = Self::eval_public_share(&decom.coeff_publics, self.id())?;
+        let coeff_publics = decom.coeff_publics.clone();
+        let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
         let implied_public = private_share.public_point();
         if implied_public != expected_public {
             error!("the private share does not match the public share");
@@ -845,6 +841,8 @@ impl TshareParticipant {
 
         self.local_storage
             .store::<storage::ValidPrivateEval>(message.from(), private_share);
+        self.local_storage
+            .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
 
         self.maybe_finish()
     }
@@ -853,7 +851,7 @@ impl TshareParticipant {
         // Have we validated and stored the public shares from everybody to everybody?
         let got_all_public_shares = self
             .local_storage
-            .contains_for_all_ids::<storage::ValidPublicCoeffs>(&self.all_participants());
+            .contains_for_all_ids::<storage::ValidPublicShare>(&self.all_participants());
 
         // Have we got the private shares from everybody to us?
         let got_all_private_shares = self
@@ -868,7 +866,7 @@ impl TshareParticipant {
                 .iter()
                 .map(|pid| {
                     self.local_storage
-                        .remove::<storage::ValidPublicCoeffs>(*pid)
+                        .remove::<storage::PublicCoeffs>(*pid)
                 })
                 .collect::<Result<Vec<_>>>()?;
             let all_public_coeffs = Self::aggregate_public_coeffs(&coeffs_from_all);

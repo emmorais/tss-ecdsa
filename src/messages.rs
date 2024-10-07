@@ -81,7 +81,7 @@ pub enum TshareMessageType {
     R2Decommit,
     /// A proof of knowledge of the discrete log of the value decommitted in
     /// Round 2
-    R3Proofs,
+    R3Proof,
     /// The encrypted private share from a participant to another.
     R3PrivateShare,
 }

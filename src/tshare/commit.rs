@@ -6,7 +6,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use super::share::CoeffPublic;
+use super::share::{CoeffPublic, EvalPublic};
 use crate::{
     errors::{InternalError, Result},
     messages::{Message, MessageType, TshareMessageType},
@@ -38,8 +38,9 @@ pub(crate) struct TshareDecommit {
     sender: ParticipantIdentifier,
     u_i: [u8; 32], // The blinding factor is never read but it is included in the commitment.
     pub rid: [u8; 32],
+    pub public_share: EvalPublic,
     pub coeff_publics: Vec<CoeffPublic>,
-    pub As: Vec<CurvePoint>,
+    pub A: CurvePoint,
 }
 
 impl TshareDecommit {
@@ -48,8 +49,9 @@ impl TshareDecommit {
         rng: &mut R,
         sid: &Identifier,
         sender: &ParticipantIdentifier,
-        coeff_publics: Vec<CoeffPublic>,
-        sch_precoms: Vec<CurvePoint>,
+        public_share: EvalPublic,
+        coeff_publics: &[CoeffPublic],
+        sch_precom: CurvePoint,
     ) -> Self {
         let mut rid = [0u8; 32];
         let mut u_i = [0u8; 32];
@@ -60,8 +62,9 @@ impl TshareDecommit {
             sender: *sender,
             rid,
             u_i,
-            coeff_publics,
-            As: sch_precoms,
+            public_share,
+            coeff_publics: coeff_publics.to_vec(),
+            A: sch_precom,
         }
     }
 
@@ -69,11 +72,10 @@ impl TshareDecommit {
     pub(crate) fn from_message(
         message: &Message,
         com: &TshareCommit,
-        threshold: usize,
     ) -> Result<Self> {
         message.check_type(MessageType::Tshare(TshareMessageType::R2Decommit))?;
         let tshare_decommit: TshareDecommit = deserialize!(&message.unverified_bytes)?;
-        tshare_decommit.verify(message.id(), message.from(), com, threshold)?;
+        tshare_decommit.verify(message.id(), message.from(), com)?;
         Ok(tshare_decommit)
     }
 
@@ -92,7 +94,6 @@ impl TshareDecommit {
         sid: Identifier,
         sender: ParticipantIdentifier,
         com: &TshareCommit,
-        threshold: usize,
     ) -> Result<()> {
         // Check the commitment.
         let rebuilt_com = self.commit()?;
@@ -111,18 +112,6 @@ impl TshareDecommit {
             return Err(InternalError::ProtocolError(Some(sender)));
         }
 
-        // Check the number of commitments As.
-        if self.As.len() < threshold {
-            error!("Incorrect number of As");
-            return Err(InternalError::ProtocolError(Some(sender)));
-        }
-
-        // Check the set of coefficients.
-        if self.coeff_publics.len() < threshold {
-            error!("Incorrect number of public shares");
-            return Err(InternalError::ProtocolError(Some(sender)));
-        }
-
         Ok(())
     }
 }
@@ -133,7 +122,7 @@ impl std::fmt::Debug for TshareDecommit {
         f.debug_struct("TshareDecommit")
             .field("sid", &self.sid)
             .field("sender", &self.sender)
-            .field("coeff_publics", &self.coeff_publics)
+            .field("public_share", &self.public_share)
             .field("...", &"[redacted]")
             .finish()
     }

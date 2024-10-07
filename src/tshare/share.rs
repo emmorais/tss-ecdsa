@@ -144,13 +144,6 @@ pub struct CoeffPublic {
     X: CurvePoint,
 }
 
-/// A curve point representing a given [`Participant`](crate::Participant)'s
-/// public evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EvalPublic {
-    X: CurvePoint,
-}
-
 impl CoeffPublic {
     /// Wrap a curve point as a public coeff.
     pub(crate) fn new(X: CurvePoint) -> Self {
@@ -179,6 +172,27 @@ impl Add<&CoeffPublic> for CoeffPublic {
 
     fn add(self, rhs: &CoeffPublic) -> Self::Output {
         CoeffPublic { X: self.X + rhs.X }
+    }
+}
+
+/// A curve point representing a given [`Participant`](crate::Participant)'s
+/// public evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvalPublic {
+    X: CurvePoint,
+}
+
+impl EvalPublic {
+    /// Wrap a curve point as a public evaluation.
+    pub(crate) fn new(X: CurvePoint) -> Self {
+        Self { X }
+    }
+}
+
+impl AsRef<CurvePoint> for EvalPublic {
+    /// Get the coeff as a curve point.
+    fn as_ref(&self) -> &CurvePoint {
+        &self.X
     }
 }
 
