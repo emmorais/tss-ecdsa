@@ -303,29 +303,13 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::SchnorrPrecom>(self.id(), sch_precom.clone());
 
-        // Store the private share from ourselves to ourselves.
-        let my_private_share = Self::eval_private_share(&coeff_privates, self.id());
-        let my_contant_term = Self::eval_private_share_at_zero(&coeff_privates);
-        if let Some(private) = self.input.share() {
-            assert_eq!(my_contant_term, private.x);
-        }
-        self.local_storage
-            .store::<storage::ValidPrivateEval>(self.id(), my_private_share.clone());
-
-        let public_share = EvalPublic::new(my_private_share.public_point());
-
         let decom = TshareDecommit::new(
             rng,
             &sid,
             &self.id(),
-            public_share,
             &coeff_publics,
             *sch_precom.precommitment(),
         );
-
-        // Mark our own public shares as verified.
-        self.local_storage
-            .store::<storage::ValidPublicShare>(self.id(), decom.public_share.clone());
 
         // Store the private coeffs from us to others so we can share them later.
         self.local_storage
@@ -549,26 +533,25 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::GlobalRid>(self.id(), global_rid);
 
-        let decom = self
-            .local_storage
-            .retrieve::<storage::Decommit>(self.id())?;
-
         let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
+
+        let private_coeffs = self
+            .local_storage
+            .retrieve::<storage::PrivateCoeffs>(self.id())?;
+
+        let my_private_share = Self::eval_private_share(private_coeffs, self.id());
+        let my_contant_term = Self::eval_private_share_at_zero(private_coeffs);
+        if let Some(private) = self.input.share() {
+            assert_eq!(my_contant_term, private.x);
+        }
+        let public_share = EvalPublic::new(my_private_share.public_point());
 
         // Generate proofs for each share.
         let precom = self
             .local_storage
             .retrieve::<storage::SchnorrPrecom>(self.id())?;
 
-        let private_coeffs = self
-            .local_storage
-            .retrieve::<storage::PrivateCoeffs>(self.id())?;
-
-        let my_private_share = self
-            .local_storage
-            .retrieve::<storage::ValidPrivateEval>(self.id())?;
-
-        let pk = &decom.public_share;
+        let pk = &public_share;
         let input = CommonInput::new(pk);
         let sk = &my_private_share.x;
 
@@ -591,6 +574,11 @@ impl TshareParticipant {
                 EvalEncrypted::encrypt(&private_share, auxinfo.pk(), rng)
             })
             .collect::<Result<Vec<_>>>()?;
+
+        self.local_storage
+            .store::<storage::ValidPrivateEval>(self.id(), my_private_share.clone());
+        self.local_storage
+            .store::<storage::ValidPublicShare>(self.id(), public_share.clone());
 
         // Send all proofs to everybody.
         let mut messages = self.message_for_other_participants(
@@ -775,24 +763,21 @@ impl TshareParticipant {
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
+        // calculate public share from the public coefficients
+        let public_share = Self::eval_public_share(&decom.coeff_publics, message.from())?;
+        let public_share = EvalPublic::new(public_share);
 
-        //for ((proof, precommit), public_share) in proof
-        //    .into_iter()
-        //    .zip(decom.A.iter())
-        //    .zip(decom.public_share.iter())
-        //{
         let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
         proof.verify_with_precommit(
-            CommonInput::new(&decom.public_share),
+            CommonInput::new(&public_share),
             &self.retrieve_context(),
             &mut transcript,
             &decom.A,
         )?;
-        //}
 
         // Only if the proof verifies do we store the participant's shares.
         self.local_storage
-            .store_once::<storage::ValidPublicShare>(message.from(), decom.public_share.clone())?;
+            .store_once::<storage::ValidPublicShare>(message.from(), public_share.clone())?;
 
         self.maybe_finish()
     }
@@ -818,11 +803,6 @@ impl TshareParticipant {
         message.check_type(MessageType::Tshare(TshareMessageType::R3PrivateShare))?;
         let encrypted_share: EvalEncrypted = deserialize!(&message.unverified_bytes)?;
 
-        // Get public coefficients from storage
-        //let coeffs_public = self
-        //    .local_storage
-        //    .retrieve::<storage::PublicCoeffs>(self.id())?;
-
         // Get my private key from the AuxInfo protocol.
         let my_dk = self.input.private_auxinfo().decryption_key();
 
@@ -845,6 +825,9 @@ impl TshareParticipant {
 
         self.local_storage
             .store::<storage::ValidPrivateEval>(message.from(), private_share);
+        //let public_share = EvalPublic::new(implied_public);
+        //self.local_storage
+        //    .store::<storage::ValidPublicShare>(message.from(), public_share);
         self.local_storage
             .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
 
@@ -1133,24 +1116,6 @@ mod tests {
                 .unwrap();
             assert_eq!(public_key.as_ref(), &public_share);
         }
-
-        // Test lagrange_coefficient_at_zero return the correct coefficients in order to
-        // recompute the sum of initial additive shares
-        /*let mut sum_lagrange = Scalar::ZERO;
-        let mut sum_input_shares = Scalar::ZERO;
-        for (input, (output, pid)) in inputs
-            .iter()
-            .zip(outputs.iter().zip(all_participants.clone()))
-        {
-            if let Some(share) = input.share() {
-                let input_share_scalar = bn_to_scalar(&share.x)?;
-                let output_share_scalar = bn_to_scalar(output.private_key_share())?;
-                let lagrange_coeff = lagrange_coefficient_at_zero(&pid, &all_participants);
-                sum_lagrange += output_share_scalar * lagrange_coeff;
-                sum_input_shares += input_share_scalar;
-            }
-        }
-        assert_eq!(sum_lagrange, sum_input_shares);*/
 
         // validate the final public key, which is given by the sum of the public keys
         // of all participants

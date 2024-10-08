@@ -6,7 +6,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use super::share::{CoeffPublic, EvalPublic};
+use super::share::CoeffPublic;
 use crate::{
     errors::{InternalError, Result},
     messages::{Message, MessageType, TshareMessageType},
@@ -38,8 +38,9 @@ pub(crate) struct TshareDecommit {
     sender: ParticipantIdentifier,
     u_i: [u8; 32], // The blinding factor is never read but it is included in the commitment.
     pub rid: [u8; 32],
-    pub public_share: EvalPublic,
+    // TODO: consider renaming
     pub coeff_publics: Vec<CoeffPublic>,
+    // TODO: bad name, in the spec it is Y, representing the precommitment
     pub A: CurvePoint,
 }
 
@@ -49,7 +50,6 @@ impl TshareDecommit {
         rng: &mut R,
         sid: &Identifier,
         sender: &ParticipantIdentifier,
-        public_share: EvalPublic,
         coeff_publics: &[CoeffPublic],
         sch_precom: CurvePoint,
     ) -> Self {
@@ -62,7 +62,6 @@ impl TshareDecommit {
             sender: *sender,
             rid,
             u_i,
-            public_share,
             coeff_publics: coeff_publics.to_vec(),
             A: sch_precom,
         }
@@ -119,7 +118,7 @@ impl std::fmt::Debug for TshareDecommit {
         f.debug_struct("TshareDecommit")
             .field("sid", &self.sid)
             .field("sender", &self.sender)
-            .field("public_share", &self.public_share)
+            .field("coeff_publics", &self.coeff_publics)
             .field("...", &"[redacted]")
             .finish()
     }
