@@ -88,13 +88,13 @@ Input:
 Rounds 1:
 - Each participant generates a random polynomial of degree `threshold - 1`.
     - Alternatively, set an existing additive share as the constant term.
-- Each participant commits to their polynomial and a Schnorr proof.
+- Each participant commits to their polynomial.
 
 Rounds 2:
-- Each participant decommits the public form of their polynomial and Schnorr proofs.
+- Each participant decommits the public form of their polynomial.
 
 Rounds 3:
-- Each participant shares a private evaluation of the polynomial with each of the other participants.
+- Each participant prove knowledge of their private shares.
 
 Output:
 - The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points).
