@@ -38,10 +38,8 @@ pub(crate) struct TshareDecommit {
     sender: ParticipantIdentifier,
     u_i: [u8; 32], // The blinding factor is never read but it is included in the commitment.
     pub rid: [u8; 32],
-    // TODO: consider renaming
     pub coeff_publics: Vec<CoeffPublic>,
-    // TODO: bad name, in the spec it is Y, representing the precommitment
-    pub A: CurvePoint,
+    pub precom: CurvePoint,
 }
 
 impl TshareDecommit {
@@ -63,7 +61,7 @@ impl TshareDecommit {
             rid,
             u_i,
             coeff_publics: coeff_publics.to_vec(),
-            A: sch_precom,
+            precom: sch_precom,
         }
     }
 

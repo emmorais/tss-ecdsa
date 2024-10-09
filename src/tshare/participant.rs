@@ -827,7 +827,7 @@ impl TshareParticipant {
             CommonInput::new(&public_share),
             &self.retrieve_context(),
             &mut transcript,
-            &decom.A,
+            &decom.precom,
         )?;
 
         // Only if the proof verifies do we store the participant's shares.
