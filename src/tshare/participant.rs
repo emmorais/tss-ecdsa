@@ -778,9 +778,7 @@ impl TshareParticipant {
 
         self.local_storage
             .store::<storage::ValidPrivateEval>(message.from(), private_share);
-        //let public_share = EvalPublic::new(implied_public);
-        //self.local_storage
-        //    .store::<storage::ValidPublicShare>(message.from(), public_share);
+
         self.local_storage
             .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
 
