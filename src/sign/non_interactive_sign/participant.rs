@@ -79,6 +79,7 @@ pub struct Input {
     digest: Keccak256,
     presign_record: PresignRecord,
     public_key_shares: Vec<KeySharePublic>,
+    shift: Option<Scalar>,
 }
 
 impl Input {
@@ -90,11 +91,13 @@ impl Input {
         message: &[u8],
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
+        shift: Option<Scalar>,
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
             presign_record: record,
             public_key_shares,
+            shift,
         }
     }
 
@@ -106,11 +109,13 @@ impl Input {
         digest: Keccak256,
         record: PresignRecord,
         public_key_shares: Vec<KeySharePublic>,
+        shift: Option<Scalar>,
     ) -> Self {
         Self {
             digest,
             presign_record: record,
             public_key_shares,
+            shift,
         }
     }
 
@@ -119,13 +124,19 @@ impl Input {
         &self.presign_record
     }
 
+    /// Retrieve the shift value.
+    fn shift_value(&self) -> Scalar {
+        self.shift.unwrap_or(Scalar::ZERO)
+    }
+
     /// Compute the digest. Note that this forces a clone of the [`Keccak256`]
     /// object.
     pub(crate) fn digest_hash(&self) -> GenericArray<u8, U32> {
         self.digest.clone().finalize()
     }
 
-    pub(crate) fn public_key(&self) -> Result<k256::ecdsa::VerifyingKey> {
+    /// Compute the public key.
+    pub fn public_key(&self) -> Result<k256::ecdsa::VerifyingKey> {
         // Add up all the key shares
         let public_key_point = self
             .public_key_shares
@@ -301,6 +312,26 @@ impl InnerProtocolParticipant for SignParticipant {
 }
 
 impl SignParticipant {
+    /// Compute the public key with the shift value applied.
+    pub fn shifted_public_key(
+        &self,
+        public_key_shares: Vec<KeySharePublic>,
+        shift: Scalar,
+    ) -> Result<VerifyingKey> {
+        // Add up all the key shares
+        let public_key_point = public_key_shares
+            .iter()
+            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+
+        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift);
+        let shifted_public_key_point = public_key_point + shifted_point;
+
+        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
+            error!("Keygen output does not produce a valid public key.");
+            InternalError::InternalInvariantFailed
+        })
+    }
+
     /// Handle a "Ready" message from ourselves.
     ///
     /// Once a "Ready" message has been received, continue to generate the round
@@ -346,7 +377,9 @@ impl SignParticipant {
 
         // Compute the share
         let share = SignatureShare::new(
-            record.mask_share() * &digest + (x_projection * record.masked_key_share()),
+            record.mask_share() * &digest
+                + x_projection * record.masked_key_share()
+                + x_projection * record.mask_share() * self.input.shift_value(),
         );
 
         // Erase the presign record
@@ -414,14 +447,15 @@ impl SignParticipant {
 
         let signature = Signature::try_from_scalars(x_projection, sum)?;
 
-        // Verify signature
-        self.input
-            .public_key()?
-            .verify_digest(self.input.digest.clone(), signature.as_ref())
-            .map_err(|e| {
-                error!("Failed to verify signature {:?}", e);
-                InternalError::ProtocolError(None)
-            })?;
+        self.shifted_public_key(
+            self.input.public_key_shares.clone(),
+            self.input.shift_value(),
+        )?
+        .verify_digest(self.input.digest.clone(), signature.as_ref())
+        .map_err(|e| {
+            error!("Failed to verify signature {:?}", e);
+            InternalError::ProtocolError(None)
+        })?;
 
         // Output full signature
         self.status = Status::TerminatedSuccessfully;
@@ -550,7 +584,7 @@ mod test {
 
         // Form signing inputs and participants
         let inputs = std::iter::zip(keygen_outputs, presign_records).map(|(keygen, record)| {
-            sign::Input::new(message, record, keygen.public_key_shares().to_vec())
+            sign::Input::new(message, record, keygen.public_key_shares().to_vec(), None)
         });
         let mut quorum = std::iter::zip(configs, inputs)
             .map(|(config, input)| {

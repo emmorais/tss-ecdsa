@@ -34,7 +34,7 @@ pub(crate) const CRYPTOGRAPHIC_RETRY_MAX: usize = 500usize;
 /// private type, `Debug` should be manually implemented with the field of this
 /// type explicitly redacted!
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Zeroize)]
-pub(crate) struct CurvePoint(k256::ProjectivePoint);
+pub struct CurvePoint(k256::ProjectivePoint);
 
 impl From<CurvePoint> for EncodedPoint {
     fn from(value: CurvePoint) -> EncodedPoint {

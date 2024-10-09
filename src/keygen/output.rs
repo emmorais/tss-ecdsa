@@ -23,6 +23,7 @@ use tracing::error;
 pub struct Output {
     public_key_shares: Vec<KeySharePublic>,
     private_key_share: KeySharePrivate,
+    chain_code: [u8; 32],
     rid: [u8; 32],
 }
 
@@ -67,6 +68,11 @@ impl Output {
         }
     }
 
+    /// Get the chaincode generated during key generation.
+    pub(crate) fn chain_code(&self) -> &[u8; 32] {
+        &self.chain_code
+    }
+
     /// Get the shared randomness generated during key generation.
     pub(crate) fn rid(&self) -> &[u8; 32] {
         &self.rid
@@ -85,6 +91,7 @@ impl Output {
     pub fn from_parts(
         public_key_shares: Vec<KeySharePublic>,
         private_key_share: KeySharePrivate,
+        chain_code: [u8; 32],
         rid: [u8; 32],
     ) -> Result<Self> {
         let pids = public_key_shares
@@ -108,6 +115,7 @@ impl Output {
         Ok(Self {
             public_key_shares,
             private_key_share,
+            chain_code,
             rid,
         })
     }
@@ -121,8 +129,13 @@ impl Output {
     ///
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
-    pub fn into_parts(self) -> (Vec<KeySharePublic>, KeySharePrivate, [u8; 32]) {
-        (self.public_key_shares, self.private_key_share, self.rid)
+    pub fn into_parts(self) -> (Vec<KeySharePublic>, KeySharePrivate, [u8; 32], [u8; 32]) {
+        (
+            self.public_key_shares,
+            self.private_key_share,
+            self.chain_code,
+            self.rid,
+        )
     }
 }
 
@@ -152,9 +165,16 @@ mod tests {
                 })
                 .unzip();
 
+            let chain_code = rng.gen();
             let rid = rng.gen();
 
-            Self::from_parts(public_key_shares, private_key_shares.pop().unwrap(), rid).unwrap()
+            Self::from_parts(
+                public_key_shares,
+                private_key_shares.pop().unwrap(),
+                chain_code,
+                rid,
+            )
+            .unwrap()
         }
 
         /// Simulate a consistent, valid output of a keygen run with the given
@@ -177,12 +197,19 @@ mod tests {
                 })
                 .unzip();
 
+            let chain_code = rng.gen();
             let rid = rng.gen();
 
             private_key_shares
                 .into_iter()
                 .map(|private_key_share| {
-                    Self::from_parts(public_key_shares.clone(), private_key_share, rid).unwrap()
+                    Self::from_parts(
+                        public_key_shares.clone(),
+                        private_key_share,
+                        chain_code,
+                        rid,
+                    )
+                    .unwrap()
                 })
                 .collect()
         }
@@ -196,8 +223,8 @@ mod tests {
             .collect::<Vec<_>>();
         let output = Output::simulate(&pids, rng);
 
-        let (public, private, rid) = output.into_parts();
-        assert!(Output::from_parts(public, private, rid).is_ok());
+        let (public, private, chain_code, rid) = output.into_parts();
+        assert!(Output::from_parts(public, private, chain_code, rid).is_ok());
     }
 
     #[test]
@@ -214,10 +241,13 @@ mod tests {
         // the public keys but it's so unlikely that we won't check it.
         let bad_private_key_share = KeySharePrivate::random(rng);
 
-        assert!(
-            Output::from_parts(output.public_key_shares, bad_private_key_share, output.rid)
-                .is_err()
+        assert!(Output::from_parts(
+            output.public_key_shares,
+            bad_private_key_share,
+            output.chain_code,
+            output.rid
         )
+        .is_err())
     }
 
     #[test]
@@ -241,10 +271,15 @@ mod tests {
             })
             .unzip();
 
+        let chain_code = rng.gen();
         let rid = rng.gen();
 
-        assert!(
-            Output::from_parts(public_key_shares, private_key_shares.pop().unwrap(), rid).is_err()
-        );
+        assert!(Output::from_parts(
+            public_key_shares,
+            private_key_shares.pop().unwrap(),
+            chain_code,
+            rid
+        )
+        .is_err());
     }
 }

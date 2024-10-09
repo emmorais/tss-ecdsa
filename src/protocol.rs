@@ -619,9 +619,11 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
+        slip0010,
         utils::testing::init_testing,
         PresignParticipant,
     };
+    use core::panic;
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
@@ -820,7 +822,14 @@ mod tests {
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
-    fn full_protocol_execution_with_noninteractive_signing_works() -> Result<()> {
+    fn test_full_protocol_execution_with_noninteractive_signing_works() {
+        assert!(full_protocol_execution_with_noninteractive_signing_works(42).is_ok());
+        // 2**31
+        let invalid_index = 1 << 31;
+        assert!(full_protocol_execution_with_noninteractive_signing_works(invalid_index).is_err());
+    }
+
+    fn full_protocol_execution_with_noninteractive_signing_works(child_index: u32) -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
         // Set GLOBAL config for participants
@@ -920,6 +929,7 @@ mod tests {
             .get(&configs.first().unwrap().id())
             .unwrap()
             .public_key()?;
+        let keygen_outputs_clone = keygen_outputs.clone();
 
         // Set up presign participants
         let presign_sid = Identifier::random(&mut rng);
@@ -978,12 +988,36 @@ mod tests {
         let digest = Keccak256::new_with_prefix(message);
         let sign_sid = Identifier::random(&mut rng);
 
+        // Get first output
+        let first_output = keygen_outputs_clone
+            .values()
+            .next()
+            .expect("could not get the first output");
+
+        let chain_code = first_output.chain_code();
+
+        let saved_public_key_bytes: Vec<u8> = saved_public_key.clone().to_sec1_bytes().to_vec();
+
+        let shift_input = slip0010::ckd::CKDInput::new(
+            None,
+            saved_public_key_bytes.to_vec(),
+            *chain_code,
+            child_index,
+        )?;
+        let ckd_output = slip0010::ckd::CKDInput::derive_public_shift(&shift_input);
+        let shift_scalar = ckd_output.private_key;
+
         // Make signing participants
         let mut sign_quorum = configs
             .into_iter()
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
-                let input = sign::Input::new(message, record, public_key_shares.clone());
+                let input = sign::Input::new(
+                    message,
+                    record,
+                    public_key_shares.clone(),
+                    Some(shift_scalar),
+                );
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1014,8 +1048,12 @@ mod tests {
         // Validate output: everyone should get the same signature...
         assert!(sign_outputs.windows(2).all(|sig| sig[0] == sig[1]));
 
-        // ...and the signature should be valid under the public key we saved
-        assert!(saved_public_key
+        // get the first participant and then call shifted_public_key
+        let first_participant = sign_quorum.first().unwrap();
+        let saved_shifted_public_key = first_participant
+            .participant
+            .shifted_public_key(public_key_shares, shift_scalar)?;
+        assert!(saved_shifted_public_key
             .verify_digest(digest, sign_outputs[0].as_ref())
             .is_ok());
 

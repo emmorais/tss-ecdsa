@@ -427,7 +427,7 @@ impl Worker {
         let key_shares = self.key_gen_material.retrieve(&key_id).public_key_shares();
         let record = self.presign_records.take(&key_id);
 
-        let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec());
+        let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec(), None);
         self.new_sub_protocol::<SignParticipant>(sid, inputs, key_id)
     }
 }
