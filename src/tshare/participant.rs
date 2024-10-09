@@ -196,7 +196,7 @@ impl ProtocolParticipant for TshareParticipant {
                 broadcast_outcome.convert(self, Self::handle_round_one_msg, rng)
             }
             MessageType::Tshare(TshareMessageType::R2Decommit) => {
-                self.handle_round_two_msg(rng, message)
+                self.handle_round_two_msg(message)
             }
             MessageType::Tshare(TshareMessageType::R3Proof) => self.handle_round_three_msg(message),
             MessageType::Tshare(TshareMessageType::R3PrivateShare) => {
@@ -386,7 +386,7 @@ impl TshareParticipant {
             let round_two_outcomes = self
                 .fetch_messages(MessageType::Tshare(TshareMessageType::R2Decommit))?
                 .iter()
-                .map(|msg| self.handle_round_two_msg(rng, msg))
+                .map(|msg| self.handle_round_two_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
 
             ProcessOutcome::collect_with_messages(round_two_outcomes, round_one_messages)
@@ -430,6 +430,40 @@ impl TshareParticipant {
             decom,
         )?;
         messages.extend_from_slice(&more_messages);
+
+        let private_coeffs = self
+            .local_storage
+            .retrieve::<storage::PrivateCoeffs>(self.id())?;
+
+        // Encrypt the private shares to each participant.
+        let encrypted_shares = self
+            .other_ids()
+            .iter()
+            .map(|other_participant_id| {
+                let private_share = Self::eval_private_share(private_coeffs, *other_participant_id);
+
+                let auxinfo = self.input.find_auxinfo_public(*other_participant_id)?;
+                EvalEncrypted::encrypt(&private_share, auxinfo.pk(), rng)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Send their private shares to each individual participant.
+        messages.extend(
+            self.other_ids()
+                .iter()
+                .zip(encrypted_shares.iter())
+                .map(|(other_participant_id, encrypted_share)| {
+                    Message::new(
+                        MessageType::Tshare(TshareMessageType::R3PrivateShare),
+                        self.sid(),
+                        self.id(),
+                        *other_participant_id,
+                        encrypted_share,
+                    )
+                })
+                .collect::<Result<Vec<Message>>>()?,
+        );
+
         Ok(messages)
     }
 
@@ -438,9 +472,8 @@ impl TshareParticipant {
     /// Here we check that the decommitments from each participant are valid.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
-    fn handle_round_two_msg<R: RngCore + CryptoRng>(
+    fn handle_round_two_msg(
         &mut self,
-        rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
@@ -472,7 +505,7 @@ impl TshareParticipant {
 
         if r2_done {
             // Generate messages for round 3...
-            let round_three_messages = run_only_once!(self.gen_round_three_msgs(rng))?;
+            let round_three_messages = run_only_once!(self.gen_round_three_msgs())?;
 
             // ...and handle any messages that other participants have sent for round 3.
             let mut round_three_outcomes = self
@@ -502,10 +535,7 @@ impl TshareParticipant {
     /// the private value corresponding to its public key share.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
-    fn gen_round_three_msgs<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-    ) -> Result<Vec<Message>> {
+    fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
         info!("Generating round three tshare messages.");
 
         // Construct `global rid` out of each participant's `rid`s.
@@ -563,45 +593,16 @@ impl TshareParticipant {
             &transcript,
         )?;
 
-        // Encrypt the private shares to each participant.
-        let encrypted_shares = self
-            .other_ids()
-            .iter()
-            .map(|other_participant_id| {
-                let private_share = Self::eval_private_share(private_coeffs, *other_participant_id);
-
-                let auxinfo = self.input.find_auxinfo_public(*other_participant_id)?;
-                EvalEncrypted::encrypt(&private_share, auxinfo.pk(), rng)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         self.local_storage
             .store::<storage::ValidPrivateEval>(self.id(), my_private_share.clone());
         self.local_storage
             .store::<storage::ValidPublicShare>(self.id(), public_share.clone());
 
         // Send all proofs to everybody.
-        let mut messages = self.message_for_other_participants(
+        let messages = self.message_for_other_participants(
             MessageType::Tshare(TshareMessageType::R3Proof),
             proof,
         )?;
-
-        // Send their private shares to each individual participant.
-        messages.extend(
-            self.other_ids()
-                .iter()
-                .zip(encrypted_shares.iter())
-                .map(|(other_participant_id, encrypted_share)| {
-                    Message::new(
-                        MessageType::Tshare(TshareMessageType::R3PrivateShare),
-                        self.sid(),
-                        self.id(),
-                        *other_participant_id,
-                        encrypted_share,
-                    )
-                })
-                .collect::<Result<Vec<Message>>>()?,
-        );
 
         Ok(messages)
     }
