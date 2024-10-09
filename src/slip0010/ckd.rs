@@ -56,22 +56,34 @@ impl MasterKeyInput {
     pub fn derive_master_key(&self) -> CKDOutput {
         let hmac = HmacSha512::new_from_slice(self.curve.as_bytes())
             .expect("this never fails: hmac can handle keys of any size");
-        let i = hmac
+        let mut i = hmac
             .clone()
             .chain_update(self.seed.clone())
             .finalize()
             .into_bytes();
-        let (i_left, i_right) = split_into_two_halfes(&i);
-        CKDOutput {
-            chain_code: (*i_right).into(),
-            private_key: bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
+
+        loop {
+            let (i_left, i_right) = split_into_two_halfes(&i);
+            if let Ok(private_key) = bn_to_scalar(&BigNumber::from_slice(i_left)) {
+                let master_private_key = private_key;
+                let master_public_key =
+                    CurvePoint::GENERATOR.multiply_by_scalar(&master_private_key);
+                if master_public_key != CurvePoint::IDENTITY {
+                    return CKDOutput {
+                        chain_code: (*i_right).into(),
+                        private_key: bn_to_scalar(&BigNumber::from_slice(*i_left)).unwrap(),
+                    };
+                }
+            }
+
+            i = hmac.clone().chain_update(&i[..]).finalize().into_bytes();
         }
     }
 }
 
 impl CKDInput {
     /// Create a new CKDInput.
-    /// If the purpose is to for non-threshold key generation, the private key
+    /// If the purpose is non-threshold key generation, the private key
     /// should be provided. If the purpose is for threshold key generation,
     /// the private key should be None.
     pub fn new(
