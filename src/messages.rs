@@ -79,11 +79,11 @@ pub enum TshareMessageType {
     R1CommitHash,
     /// The information committed to in Round 1
     R2Decommit,
+    /// The encrypted private share from a participant to another.
+    R2PrivateShare,
     /// A proof of knowledge of the discrete log of the value decommitted in
     /// Round 2
     R3Proof,
-    /// The encrypted private share from a participant to another.
-    R3PrivateShare,
 }
 
 /// An enum consisting of all keyrefresh message types

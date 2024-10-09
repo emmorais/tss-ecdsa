@@ -198,10 +198,10 @@ impl ProtocolParticipant for TshareParticipant {
             MessageType::Tshare(TshareMessageType::R2Decommit) => {
                 self.handle_round_two_msg(message)
             }
-            MessageType::Tshare(TshareMessageType::R3Proof) => self.handle_round_three_msg(message),
-            MessageType::Tshare(TshareMessageType::R3PrivateShare) => {
-                self.handle_round_three_msg_private(message)
+            MessageType::Tshare(TshareMessageType::R2PrivateShare) => {
+                self.handle_round_two_msg_private(message)
             }
+            MessageType::Tshare(TshareMessageType::R3Proof) => self.handle_round_three_msg(message),
             message_type => {
                 error!(
                     "Incorrect MessageType given to TshareParticipant. Got: {:?}",
@@ -454,7 +454,7 @@ impl TshareParticipant {
                 .zip(encrypted_shares.iter())
                 .map(|(other_participant_id, encrypted_share)| {
                     Message::new(
-                        MessageType::Tshare(TshareMessageType::R3PrivateShare),
+                        MessageType::Tshare(TshareMessageType::R2PrivateShare),
                         self.sid(),
                         self.id(),
                         *other_participant_id,
@@ -507,21 +507,23 @@ impl TshareParticipant {
             // Generate messages for round 3...
             let round_three_messages = run_only_once!(self.gen_round_three_msgs())?;
 
+            let mut round_outcomes = self
+                .fetch_messages(MessageType::Tshare(TshareMessageType::R2PrivateShare))?
+                .iter()
+                .map(|msg| self.handle_round_two_msg_private(msg))
+                .collect::<Result<Vec<_>>>()?;
+
             // ...and handle any messages that other participants have sent for round 3.
-            let mut round_three_outcomes = self
+            let round_three_outcomes = self
                 .fetch_messages(MessageType::Tshare(TshareMessageType::R3Proof))?
                 .iter()
                 .map(|msg| self.handle_round_three_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
 
-            let outcomes_private = self
-                .fetch_messages(MessageType::Tshare(TshareMessageType::R3PrivateShare))?
-                .iter()
-                .map(|msg| self.handle_round_three_msg_private(msg))
-                .collect::<Result<Vec<_>>>()?;
-            round_three_outcomes.extend(outcomes_private);
+            //round_three_outcomes.extend(outcomes_private);
+            round_outcomes.extend(round_three_outcomes);
 
-            ProcessOutcome::collect_with_messages(round_three_outcomes, round_three_messages)
+            ProcessOutcome::collect_with_messages(round_outcomes, round_three_messages)
         } else {
             // Otherwise, wait for more round 2 messages.
             Ok(ProcessOutcome::Incomplete)
@@ -733,6 +735,58 @@ impl TshareParticipant {
         result
     }
 
+    /// Handle the protocol's round two private messages.
+    ///
+    /// Here we validate and store a private share from someone to us.
+    #[cfg_attr(feature = "flame_it", flame("tshare"))]
+    #[instrument(skip_all, err(Debug))]
+    fn handle_round_two_msg_private(
+        &mut self,
+        message: &Message,
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        self.check_for_duplicate_msg::<storage::ValidPrivateEval>(message.from())?;
+
+        if !self.can_handle_round_three_msg() {
+            info!("Not yet ready to handle round three tshare private message.");
+            self.stash_message(message)?;
+            return Ok(ProcessOutcome::Incomplete);
+        }
+        info!("Handling round three tshare private message.");
+
+        message.check_type(MessageType::Tshare(TshareMessageType::R2PrivateShare))?;
+        let encrypted_share: EvalEncrypted = deserialize!(&message.unverified_bytes)?;
+
+        // Get my private key from the AuxInfo protocol.
+        let my_dk = self.input.private_auxinfo().decryption_key();
+
+        // Decrypt the private share.
+        let private_share = encrypted_share.decrypt(my_dk)?;
+
+        // Feldman validation
+        // Check that this private share matches our public share in TshareDecommit
+        // from this participant.
+        let decom = self
+            .local_storage
+            .retrieve::<storage::Decommit>(message.from())?;
+        let coeff_publics = decom.coeff_publics.clone();
+        let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
+        let implied_public = private_share.public_point();
+        if implied_public != expected_public {
+            error!("the private share does not match the public share");
+            return Err(InternalError::ProtocolError(Some(message.from())));
+        }
+
+        self.local_storage
+            .store::<storage::ValidPrivateEval>(message.from(), private_share);
+        //let public_share = EvalPublic::new(implied_public);
+        //self.local_storage
+        //    .store::<storage::ValidPublicShare>(message.from(), public_share);
+        self.local_storage
+            .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
+
+        self.maybe_finish()
+    }
+
     /// Handle round three messages only after our own `gen_round_three_msgs`.
     fn can_handle_round_three_msg(&self) -> bool {
         self.local_storage.contains::<storage::GlobalRid>(self.id())
@@ -779,58 +833,6 @@ impl TshareParticipant {
         // Only if the proof verifies do we store the participant's shares.
         self.local_storage
             .store_once::<storage::ValidPublicShare>(message.from(), public_share.clone())?;
-
-        self.maybe_finish()
-    }
-
-    /// Handle the protocol's round three private messages.
-    ///
-    /// Here we validate and store a private share from someone to us.
-    #[cfg_attr(feature = "flame_it", flame("tshare"))]
-    #[instrument(skip_all, err(Debug))]
-    fn handle_round_three_msg_private(
-        &mut self,
-        message: &Message,
-    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        self.check_for_duplicate_msg::<storage::ValidPrivateEval>(message.from())?;
-
-        if !self.can_handle_round_three_msg() {
-            info!("Not yet ready to handle round three tshare private message.");
-            self.stash_message(message)?;
-            return Ok(ProcessOutcome::Incomplete);
-        }
-        info!("Handling round three tshare private message.");
-
-        message.check_type(MessageType::Tshare(TshareMessageType::R3PrivateShare))?;
-        let encrypted_share: EvalEncrypted = deserialize!(&message.unverified_bytes)?;
-
-        // Get my private key from the AuxInfo protocol.
-        let my_dk = self.input.private_auxinfo().decryption_key();
-
-        // Decrypt the private share.
-        let private_share = encrypted_share.decrypt(my_dk)?;
-
-        // Feldman validation
-        // Check that this private share matches our public share in TshareDecommit
-        // from this participant.
-        let decom = self
-            .local_storage
-            .retrieve::<storage::Decommit>(message.from())?;
-        let coeff_publics = decom.coeff_publics.clone();
-        let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
-        let implied_public = private_share.public_point();
-        if implied_public != expected_public {
-            error!("the private share does not match the public share");
-            return Err(InternalError::ProtocolError(Some(message.from())));
-        }
-
-        self.local_storage
-            .store::<storage::ValidPrivateEval>(message.from(), private_share);
-        //let public_share = EvalPublic::new(implied_public);
-        //self.local_storage
-        //    .store::<storage::ValidPublicShare>(message.from(), public_share);
-        self.local_storage
-            .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
 
         self.maybe_finish()
     }
