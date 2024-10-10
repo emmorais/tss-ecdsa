@@ -1066,7 +1066,7 @@ mod tests {
         // t-out-of-t conversion
         let chain_code = keygen_outputs[&configs[0].id()].chain_code();
         let rid = keygen_outputs[&configs[0].id()].rid();
-        let (mut toft_keygen_outputs, toft_public_keys) =
+        let (mut toft_keygen_outputs, _toft_public_keys) =
             TshareParticipant::convert_to_t_out_of_t_shares(
                 tshare_outputs,
                 all_participants.clone(),
@@ -1208,7 +1208,7 @@ mod tests {
                 let input = sign::Input::new(
                     message,
                     record,
-                    public_key_sahres.clone(),
+                    public_key_shares.clone(),
                     QUORUM_THRESHOLD,
                     Some(shift_scalar),
                 );
