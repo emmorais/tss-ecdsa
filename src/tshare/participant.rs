@@ -693,8 +693,12 @@ impl TshareParticipant {
             <KeygenParticipant as ProtocolParticipant>::Output,
         > = HashMap::new();
         for (pid, private_key_share) in new_private_shares {
-            let output =
-                crate::keygen::Output::from_parts(public_keys.clone(), private_key_share, chain_code, rid)?;
+            let output = crate::keygen::Output::from_parts(
+                public_keys.clone(),
+                private_key_share,
+                chain_code,
+                rid,
+            )?;
             assert!(keygen_outputs.insert(pid, output).is_none());
         }
         Ok((keygen_outputs, public_keys))

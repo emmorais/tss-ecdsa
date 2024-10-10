@@ -725,7 +725,7 @@ mod test {
             presign_record,
             keygen_output.public_key_shares().to_vec(),
             threshold,
-            None, 
+            None,
         );
 
         let participant = SignParticipant::new(sid, id, other_participant_ids, input);

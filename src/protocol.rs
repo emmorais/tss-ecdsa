@@ -643,13 +643,13 @@ mod tests {
         participant::Status,
         presign,
         sign::{self, InteractiveSignParticipant, SignParticipant},
+        slip0010,
         tshare::{self, CoeffPrivate, TshareParticipant},
         utils::{bn_to_scalar, testing::init_testing},
-        slip0010,
         PresignParticipant,
     };
-    use k256::{ecdsa::signature::DigestVerifier, Scalar};
     use core::panic;
+    use k256::{ecdsa::signature::DigestVerifier, Scalar};
     use rand::seq::IteratorRandom;
     use sha3::{Digest, Keccak256};
     use std::{collections::HashMap, vec};
@@ -864,7 +864,10 @@ mod tests {
         assert!(full_protocol_execution_with_noninteractive_signing_works(2, 2, 3, 42).is_ok());
         // 2**31
         let invalid_index = 1 << 31;
-        assert!(full_protocol_execution_with_noninteractive_signing_works(3, 3, 3, invalid_index).is_err());
+        assert!(
+            full_protocol_execution_with_noninteractive_signing_works(3, 3, 3, invalid_index)
+                .is_err()
+        );
     }
 
     #[ignore]
@@ -1202,8 +1205,13 @@ mod tests {
             .into_iter()
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
-                let input =
-                    sign::Input::new(message, record, public_key_sahres.clone(), QUORUM_THRESHOLD, Some(shift_scalar));
+                let input = sign::Input::new(
+                    message,
+                    record,
+                    public_key_sahres.clone(),
+                    QUORUM_THRESHOLD,
+                    Some(shift_scalar),
+                );
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
