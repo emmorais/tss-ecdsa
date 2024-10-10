@@ -1203,7 +1203,7 @@ mod tests {
             .map(|config| {
                 let record = presign_outputs.remove(&config.id()).unwrap();
                 let input =
-                    sign::Input::new(message, record, toft_public_keys.clone(), QUORUM_THRESHOLD, Some(shift_scalar));
+                    sign::Input::new(message, record, public_key_sahres.clone(), QUORUM_THRESHOLD, Some(shift_scalar));
                 Participant::<SignParticipant>::from_config(config, sign_sid, input)
             })
             .collect::<Result<Vec<_>>>()?;
