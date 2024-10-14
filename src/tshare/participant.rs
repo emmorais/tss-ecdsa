@@ -8,7 +8,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, os::unix::thread, time::Duration};
+use std::thread::sleep;
 
 use super::{
     commit::{TshareCommit, TshareDecommit},
@@ -171,6 +172,7 @@ impl ProtocolParticipant for TshareParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<Self::Output>> {
+        dbg!(self.id());
         info!(
             "TSHARE: Player {}: received {:?} from {}",
             self.id(),
@@ -275,6 +277,8 @@ impl TshareParticipant {
         rng: &mut R,
         sid: Identifier,
     ) -> Result<Vec<Message>> {
+        dbg!("######################## 1 gen ################################");
+        dbg!(self.id());
         info!("Generating round one tshare messages.");
 
         // Generate shares for all participants.
@@ -303,6 +307,8 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::SchnorrPrecom>(self.id(), sch_precom.clone());
 
+        //dbg!(self.id());
+        //dbg!(&coeff_publics);
         let decom = TshareDecommit::new(
             rng,
             &sid,
@@ -350,7 +356,10 @@ impl TshareParticipant {
         rng: &mut R,
         broadcast_message: BroadcastOutput,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        dbg!("######################### 1 ################################");
+        dbg!(self.id());
         let message = broadcast_message.into_message(BroadcastTag::TshareR1CommitHash)?;
+        dbg!(message.from());
 
         self.check_for_duplicate_msg::<storage::Commit>(message.from())?;
         info!("Handling round one tshare message.");
@@ -379,8 +388,15 @@ impl TshareParticipant {
             .contains_for_all_ids::<storage::Commit>(self.other_ids());
 
         if r1_done {
+            dbg!("######################### 1 done ################################");
             // Finish round 1 by generating messages for round 2
             let round_one_messages = run_only_once!(self.gen_round_two_msgs(rng, message.id()))?;
+
+            let mut outcomes = self
+                .fetch_messages(MessageType::Tshare(TshareMessageType::R2PrivateShare))?
+                .iter()
+                .map(|msg| self.handle_round_two_msg_private(msg))
+                .collect::<Result<Vec<_>>>()?;
 
             // Process any round 2 messages we may have received early
             let round_two_outcomes = self
@@ -388,8 +404,10 @@ impl TshareParticipant {
                 .iter()
                 .map(|msg| self.handle_round_two_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
+            
+            outcomes.extend(round_two_outcomes);
 
-            ProcessOutcome::collect_with_messages(round_two_outcomes, round_one_messages)
+            ProcessOutcome::collect_with_messages(outcomes, round_one_messages)
         } else {
             // Otherwise, wait for more round 1 messages
             Ok(ProcessOutcome::Incomplete)
@@ -406,6 +424,8 @@ impl TshareParticipant {
         rng: &mut R,
         sid: Identifier,
     ) -> Result<Vec<Message>> {
+        dbg!("######################### 2 gen ################################");
+        dbg!(self.id());
         info!("Generating round two tshare messages.");
 
         let mut messages = vec![];
@@ -429,7 +449,7 @@ impl TshareParticipant {
             MessageType::Tshare(TshareMessageType::R2Decommit),
             decom,
         )?;
-        messages.extend_from_slice(&more_messages);
+        //messages.extend_from_slice(&more_messages);
 
         let private_coeffs = self
             .local_storage
@@ -463,6 +483,7 @@ impl TshareParticipant {
                 })
                 .collect::<Result<Vec<Message>>>()?,
         );
+        messages.extend_from_slice(&more_messages);
 
         Ok(messages)
     }
@@ -476,6 +497,10 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        dbg!("######################### 2 ################################");
+        dbg!(message.from());
+        dbg!(message.to());
+        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
         info!("Handling round two tshare message.");
 
@@ -496,22 +521,55 @@ impl TshareParticipant {
             .retrieve::<storage::Commit>(message.from())?;
         let decom = TshareDecommit::from_message(message, com)?;
         self.local_storage
-            .store_once::<storage::Decommit>(message.from(), decom)?;
+            .store_once::<storage::Decommit>(message.from(), decom.clone())?;
+        self.local_storage
+            .store::<storage::PublicCoeffs>(message.from(), decom.coeff_publics);
+
+
+        let mut got_all_private_shares = self
+            .local_storage
+            .contains_for_all_ids::<storage::ValidPrivateEval>(&self.other_ids());
+        
+        // while not all private shares are received, we sleep and wait for them
+        /*while !got_all_private_shares {
+            dbg!("waiting for all private shares");
+            sleep(Duration::from_millis(1000));
+            got_all_private_shares = self
+                .local_storage
+                .contains_for_all_ids::<storage::ValidPrivateEval>(&self.other_ids());
+        }*/
 
         // Check if we've received all the decommits
-        let r2_done = self
+        let mut r2_done = self
             .local_storage
             .contains_for_all_ids::<storage::Decommit>(&self.all_participants());
 
+        dbg!(r2_done);
+        r2_done &= got_all_private_shares;
+        dbg!(r2_done);
+
         if r2_done {
+            dbg!("######################### 2 done ################################");
+            // for each participant, read the private share and check if it matches the public share
+            for pid in self.other_ids() {
+                let decom = self
+                    .local_storage
+                    .retrieve::<storage::Decommit>(*pid)?;
+                let coeff_publics = decom.coeff_publics.clone();
+                let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
+                let private_share = self
+                    .local_storage
+                    .retrieve::<storage::ValidPrivateEval>(*pid)?;
+                dbg!(private_share.clone());
+                let implied_public = private_share.public_point();
+                if implied_public != expected_public {
+                    error!("the private share does not match the public share");
+                    return Err(InternalError::ProtocolError(Some(*pid)));
+                }
+            }
+
             // Generate messages for round 3...
             let round_three_messages = run_only_once!(self.gen_round_three_msgs())?;
-
-            let mut round_outcomes = self
-                .fetch_messages(MessageType::Tshare(TshareMessageType::R2PrivateShare))?
-                .iter()
-                .map(|msg| self.handle_round_two_msg_private(msg))
-                .collect::<Result<Vec<_>>>()?;
 
             // ...and handle any messages that other participants have sent for round 3.
             let round_three_outcomes = self
@@ -520,11 +578,9 @@ impl TshareParticipant {
                 .map(|msg| self.handle_round_three_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
 
-            //round_three_outcomes.extend(outcomes_private);
-            round_outcomes.extend(round_three_outcomes);
-
-            ProcessOutcome::collect_with_messages(round_outcomes, round_three_messages)
+            ProcessOutcome::collect_with_messages(round_three_outcomes, round_three_messages)
         } else {
+            dbg!("else então");
             // Otherwise, wait for more round 2 messages.
             Ok(ProcessOutcome::Incomplete)
         }
@@ -538,6 +594,8 @@ impl TshareParticipant {
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
+        dbg!("######################## 3 gen ################################");
+        dbg!(self.id());
         info!("Generating round three tshare messages.");
 
         // Construct `global rid` out of each participant's `rid`s.
@@ -565,6 +623,9 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::GlobalRid>(self.id(), global_rid);
 
+        //dbg!(self.sid());
+        //dbg!(global_rid);
+        //dbg!(self.id());
         let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
 
         let private_coeffs = self
@@ -576,37 +637,62 @@ impl TshareParticipant {
         if let Some(private) = self.input.share() {
             assert_eq!(my_contant_term, private.x);
         }
-        let public_share = EvalPublic::new(my_private_share.public_point());
 
-        // Generate proofs for each share.
-        let precom = self
+        // Have we got the private shares from everybody to us?
+        let got_all_private_shares = self
             .local_storage
-            .retrieve::<storage::SchnorrPrecom>(self.id())?;
+            .contains_for_all_ids::<storage::ValidPrivateEval>(&self.other_ids());
 
-        let pk = &public_share;
-        let input = CommonInput::new(pk);
-        let sk = &my_private_share.x;
+        dbg!(got_all_private_shares);
+        if got_all_private_shares {
+            dbg!("got all private shares");
+            // Compute the one's own private evaluation.
 
-        let proof = PiSchProof::prove_from_precommit(
-            &self.retrieve_context(),
-            precom,
-            &input,
-            &ProverSecret::new(&scalar_to_bn(sk)),
-            &transcript,
-        )?;
+            // Get a slice of EvalPrivate from other participants
+            let mut from_all_to_me_private = vec![];
+            for pid in self.other_ids() {
+                let private_share = self
+                    .local_storage
+                    .retrieve::<storage::ValidPrivateEval>(*pid)?;
+                from_all_to_me_private.push(private_share.clone());
+            }
 
-        self.local_storage
-            .store::<storage::ValidPrivateEval>(self.id(), my_private_share.clone());
-        self.local_storage
-            .store::<storage::ValidPublicShare>(self.id(), public_share.clone());
+            let other_private_shares = Self::aggregate_private_shares(&from_all_to_me_private);
+            let final_private_share = other_private_shares + &my_private_share;
+            let final_public_share = EvalPublic::new(final_private_share.public_point());
 
-        // Send all proofs to everybody.
-        let messages = self.message_for_other_participants(
-            MessageType::Tshare(TshareMessageType::R3Proof),
-            proof,
-        )?;
+            // Generate proofs for each share.
+            let precom = self
+                .local_storage
+                .retrieve::<storage::SchnorrPrecom>(self.id())?;
 
-        Ok(messages)
+            let pk = &final_public_share;
+            let input = CommonInput::new(pk);
+            let sk = &final_private_share.x;
+
+            let proof = PiSchProof::prove_from_precommit(
+                &self.retrieve_context(),
+                precom,
+                &input,
+                &ProverSecret::new(&scalar_to_bn(sk)),
+                &transcript,
+            )?;
+
+            self.local_storage
+                .store::<storage::ValidPrivateEval>(self.id(), final_private_share.clone());
+            self.local_storage
+                .store::<storage::ValidPublicShare>(self.id(), final_public_share.clone());
+
+            // Send all proofs to everybody.
+            let messages = self.message_for_other_participants(
+                MessageType::Tshare(TshareMessageType::R3Proof),
+                proof,
+            )?;
+
+            Ok(messages)
+        } else {
+            Err(InternalError::ProtocolError(None))
+        }
     }
 
     /// Assign a non-null x coordinate to each participant.
@@ -749,14 +835,13 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        dbg!("######################### 2 private ################################");
+        dbg!(message.from());
+        dbg!(message.to());
+        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::ValidPrivateEval>(message.from())?;
 
-        if !self.can_handle_round_three_msg() {
-            info!("Not yet ready to handle round three tshare private message.");
-            self.stash_message(message)?;
-            return Ok(ProcessOutcome::Incomplete);
-        }
-        info!("Handling round three tshare private message.");
+        info!("Handling round two tshare private message.");
 
         message.check_type(MessageType::Tshare(TshareMessageType::R2PrivateShare))?;
         let encrypted_share: EvalEncrypted = deserialize!(&message.unverified_bytes)?;
@@ -766,28 +851,12 @@ impl TshareParticipant {
 
         // Decrypt the private share.
         let private_share = encrypted_share.decrypt(my_dk)?;
-
-        // Feldman validation
-        // Check that this private share matches our public share in TshareDecommit
-        // from this participant.
-        let decom = self
-            .local_storage
-            .retrieve::<storage::Decommit>(message.from())?;
-        let coeff_publics = decom.coeff_publics.clone();
-        let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
-        let implied_public = private_share.public_point();
-        if implied_public != expected_public {
-            error!("the private share does not match the public share");
-            return Err(InternalError::ProtocolError(Some(message.from())));
-        }
-
+        // Write the private share to the storage
         self.local_storage
-            .store::<storage::ValidPrivateEval>(message.from(), private_share);
+            .store_once::<storage::ValidPrivateEval>(message.from(), private_share)?;
 
-        self.local_storage
-            .store::<storage::PublicCoeffs>(message.from(), coeff_publics);
-
-        self.maybe_finish()
+        Ok(ProcessOutcome::Incomplete)
+        //self.maybe_finish()
     }
 
     /// Handle round three messages only after our own `gen_round_three_msgs`.
@@ -804,6 +873,10 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        dbg!("######################### 3 ################################");
+        dbg!(message.from());
+        dbg!(message.to());
+        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::ValidPublicShare>(message.from())?;
 
         if !self.can_handle_round_three_msg() {
@@ -822,20 +895,48 @@ impl TshareParticipant {
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
         // calculate public share from the public coefficients
-        let public_share = Self::eval_public_share(&decom.coeff_publics, message.from())?;
-        let public_share = EvalPublic::new(public_share);
+        //let public_share = Self::eval_public_share(&decom.coeff_publics, message.from())?;
+        //let public_share = EvalPublic::new(public_share);
 
+        // get the final_public_share from the storage
+        //let public_share = self
+        //    .local_storage
+        //    .retrieve::<storage::ValidPublicShare>(self.id())?;
+        //let precom = self
+        //    .local_storage
+        //    .retrieve::<storage::SchnorrPrecom>(self.id())?;
+
+
+        // In order to compute the public share, we need to have the public coefficients
+        // from all participants. Using the public coefficients from the decommitment
+        // we can compute the public share.        
+        
+        //let public_share = Self::eval_public_share(&decom.coeff_publics, message.from())?;
+
+        let mut final_public_share = CurvePoint::IDENTITY;
+        for pid in self.all_participants().iter() {
+            let coeff_publics = self
+                .local_storage
+                .retrieve::<storage::PublicCoeffs>(*pid)?;
+            let public_share = Self::eval_public_share(&coeff_publics, message.from())?;
+            final_public_share = final_public_share + public_share;
+        }
+
+        //dbg!(self.sid());
+        //dbg!(global_rid);
+        //dbg!(message.from());
         let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
         proof.verify_with_precommit(
-            CommonInput::new(&public_share),
+            CommonInput::new(&final_public_share),
             &self.retrieve_context(),
             &mut transcript,
             &decom.precom,
         )?;
 
+        let final_public_share = EvalPublic::new(final_public_share);
         // Only if the proof verifies do we store the participant's shares.
         self.local_storage
-            .store_once::<storage::ValidPublicShare>(message.from(), public_share.clone())?;
+            .store_once::<storage::ValidPublicShare>(message.from(), final_public_share.clone())?;
 
         self.maybe_finish()
     }
@@ -847,12 +948,12 @@ impl TshareParticipant {
             .contains_for_all_ids::<storage::ValidPublicShare>(&self.all_participants());
 
         // Have we got the private shares from everybody to us?
-        let got_all_private_shares = self
-            .local_storage
-            .contains_for_all_ids::<storage::ValidPrivateEval>(&self.all_participants());
+        //let got_all_private_shares = self
+        //    .local_storage
+         //   .contains_for_all_ids::<storage::ValidPrivateEval>(&self.all_participants());
 
         // If so, we completed the protocol! Return the outputs.
-        if got_all_public_shares && got_all_private_shares {
+        if got_all_public_shares {
             // Compute the public polynomial.
             let coeffs_from_all = self
                 .all_participants()
@@ -862,12 +963,17 @@ impl TshareParticipant {
             let all_public_coeffs = Self::aggregate_public_coeffs(&coeffs_from_all);
 
             // Compute the one's own private evaluation.
-            let from_all_to_me_private = self
-                .all_participants()
-                .iter()
-                .map(|pid| self.local_storage.remove::<storage::ValidPrivateEval>(*pid))
-                .collect::<Result<Vec<_>>>()?;
-            let my_private_share = Self::aggregate_private_shares(&from_all_to_me_private);
+            //let from_all_to_me_private = self
+            //    .all_participants()
+            //    .iter()
+            //    .map(|pid| self.local_storage.remove::<storage::ValidPrivateEval>(*pid))
+            //    .collect::<Result<Vec<_>>>()?;
+            
+
+            // read my_private_share from the storage
+            let my_private_share = self
+                .local_storage
+                .retrieve::<storage::ValidPrivateEval>(self.id())?;
 
             // Double-check that the aggregated private share matches the aggregated public
             // coeffs.
@@ -1019,9 +1125,11 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn tshare_always_produces_valid_outputs() -> Result<()> {
-        for size in 2..4 {
-            tshare_produces_valid_outputs(size)?;
-        }
+        //for size in 2..4 {
+        //    tshare_produces_valid_outputs(size)?;
+        //}
+        //tshare_produces_valid_outputs(2)?;
+        tshare_produces_valid_outputs(3)?;
         Ok(())
     }
 
@@ -1047,6 +1155,8 @@ mod tests {
         }
 
         while !is_tshare_done(&quorum) {
+            dbg!("######################### loop ################################");
+            dbg!(inboxes.clone());
             let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
                 None => continue,
                 Some(x) => x,

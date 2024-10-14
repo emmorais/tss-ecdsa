@@ -76,6 +76,17 @@ pub struct EvalPrivate {
     pub x: Scalar,
 }
 
+/// Implement addition operation for `EvalPrivate`.
+impl Add<&EvalPrivate> for EvalPrivate {
+    type Output = Self;
+
+    fn add(self, rhs: &EvalPrivate) -> Self::Output {
+        EvalPrivate {
+            x: self.x + rhs.x,
+        }
+    }
+}
+
 impl EvalPrivate {
     pub fn new(x: Scalar) -> Self {
         EvalPrivate { x }
