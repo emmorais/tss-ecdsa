@@ -81,9 +81,7 @@ impl Add<&EvalPrivate> for EvalPrivate {
     type Output = Self;
 
     fn add(self, rhs: &EvalPrivate) -> Self::Output {
-        EvalPrivate {
-            x: self.x + rhs.x,
-        }
+        EvalPrivate { x: self.x + rhs.x }
     }
 }
 

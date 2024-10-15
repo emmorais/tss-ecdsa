@@ -8,8 +8,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::{collections::HashMap, os::unix::thread, time::Duration};
-use std::thread::sleep;
+use std::collections::HashMap;
 
 use super::{
     commit::{TshareCommit, TshareDecommit},
@@ -172,7 +171,6 @@ impl ProtocolParticipant for TshareParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<Self::Output>> {
-        dbg!(self.id());
         info!(
             "TSHARE: Player {}: received {:?} from {}",
             self.id(),
@@ -189,7 +187,6 @@ impl ProtocolParticipant for TshareParticipant {
             return Ok(ProcessOutcome::Incomplete);
         }
 
-        dbg!(message.message_type());
         match message.message_type() {
             MessageType::Tshare(TshareMessageType::Ready) => self.handle_ready_msg(rng, message),
             MessageType::Tshare(TshareMessageType::R1CommitHash) => {
@@ -278,8 +275,6 @@ impl TshareParticipant {
         rng: &mut R,
         sid: Identifier,
     ) -> Result<Vec<Message>> {
-        dbg!("######################## 1 gen ################################");
-        dbg!(self.id());
         info!("Generating round one tshare messages.");
 
         // Generate shares for all participants.
@@ -308,8 +303,6 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::SchnorrPrecom>(self.id(), sch_precom.clone());
 
-        //dbg!(self.id());
-        //dbg!(&coeff_publics);
         let decom = TshareDecommit::new(
             rng,
             &sid,
@@ -357,10 +350,7 @@ impl TshareParticipant {
         rng: &mut R,
         broadcast_message: BroadcastOutput,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        dbg!("######################### 1 ################################");
-        dbg!(self.id());
         let message = broadcast_message.into_message(BroadcastTag::TshareR1CommitHash)?;
-        dbg!(message.from());
 
         self.check_for_duplicate_msg::<storage::Commit>(message.from())?;
         info!("Handling round one tshare message.");
@@ -389,7 +379,6 @@ impl TshareParticipant {
             .contains_for_all_ids::<storage::Commit>(self.other_ids());
 
         if r1_done {
-            dbg!("######################### 1 done ################################");
             // Finish round 1 by generating messages for round 2
             let round_one_messages = run_only_once!(self.gen_round_two_msgs(rng, message.id()))?;
 
@@ -405,7 +394,7 @@ impl TshareParticipant {
                 .iter()
                 .map(|msg| self.handle_round_two_msg(msg))
                 .collect::<Result<Vec<_>>>()?;
-            
+
             outcomes.extend(round_two_outcomes);
 
             ProcessOutcome::collect_with_messages(outcomes, round_one_messages)
@@ -425,8 +414,6 @@ impl TshareParticipant {
         rng: &mut R,
         sid: Identifier,
     ) -> Result<Vec<Message>> {
-        dbg!("######################### 2 gen ################################");
-        dbg!(self.id());
         info!("Generating round two tshare messages.");
 
         let mut messages = vec![];
@@ -498,10 +485,6 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        dbg!("######################### 2 private ################################");
-        dbg!(message.from());
-        dbg!(message.to());
-        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::ValidPrivateEval>(message.from())?;
 
         info!("Handling round two tshare private message.");
@@ -518,8 +501,9 @@ impl TshareParticipant {
         self.local_storage
             .store_once::<storage::ValidPrivateEval>(message.from(), private_share)?;
 
-        Ok(ProcessOutcome::Incomplete)
-        //self.maybe_finish()
+        Ok(self
+            .maybe_finish_round2()
+            .expect("Could not finish round 2"))
     }
 
     /// Handle the protocol's round two messages.
@@ -531,10 +515,6 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        dbg!("######################### 2 ################################");
-        dbg!(message.from());
-        dbg!(message.to());
-        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
         info!("Handling round two tshare message.");
 
@@ -559,32 +539,35 @@ impl TshareParticipant {
         self.local_storage
             .store::<storage::PublicCoeffs>(message.from(), decom.coeff_publics);
 
+        Ok(self
+            .maybe_finish_round2()
+            .expect("Could not finish round 2"))
+    }
+
+    fn maybe_finish_round2(
+        &mut self,
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         let got_all_private_shares = self
             .local_storage
-            .contains_for_all_ids::<storage::ValidPrivateEval>(&self.other_ids());
-        
+            .contains_for_all_ids::<storage::ValidPrivateEval>(self.other_ids());
+
         // Check if we've received all the decommits
         let mut r2_done = self
             .local_storage
             .contains_for_all_ids::<storage::Decommit>(&self.all_participants());
 
-        dbg!(r2_done);
         r2_done &= got_all_private_shares;
-        dbg!(r2_done);
 
         if r2_done {
-            dbg!("######################### 2 done ################################");
-            // for each participant, read the private share and check if it matches the public share
+            // for each participant, read the private share and check if it matches the
+            // public share
             for pid in self.other_ids() {
-                let decom = self
-                    .local_storage
-                    .retrieve::<storage::Decommit>(*pid)?;
+                let decom = self.local_storage.retrieve::<storage::Decommit>(*pid)?;
                 let coeff_publics = decom.coeff_publics.clone();
                 let expected_public = Self::eval_public_share(coeff_publics.as_slice(), self.id())?;
                 let private_share = self
                     .local_storage
                     .retrieve::<storage::ValidPrivateEval>(*pid)?;
-                dbg!(private_share.clone());
                 let implied_public = private_share.public_point();
                 if implied_public != expected_public {
                     error!("the private share does not match the public share");
@@ -604,10 +587,8 @@ impl TshareParticipant {
 
             ProcessOutcome::collect_with_messages(round_three_outcomes, round_three_messages)
         } else {
-            dbg!("else.............................................");
             // Otherwise, wait for more round 2 messages.
-            //self.stash_message(message)?;
-            return Ok(ProcessOutcome::Incomplete);
+            Ok(ProcessOutcome::Incomplete)
         }
     }
 
@@ -619,8 +600,6 @@ impl TshareParticipant {
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
-        dbg!("######################## 3 gen ################################");
-        dbg!(self.id());
         info!("Generating round three tshare messages.");
 
         // Construct `global rid` out of each participant's `rid`s.
@@ -663,11 +642,9 @@ impl TshareParticipant {
         // Have we got the private shares from everybody to us?
         let got_all_private_shares = self
             .local_storage
-            .contains_for_all_ids::<storage::ValidPrivateEval>(&self.other_ids());
+            .contains_for_all_ids::<storage::ValidPrivateEval>(self.other_ids());
 
-        dbg!(got_all_private_shares);
         if got_all_private_shares {
-            dbg!("got all private shares");
             // Compute the one's own private evaluation.
 
             // Get a slice of EvalPrivate from other participants
@@ -862,10 +839,6 @@ impl TshareParticipant {
         &mut self,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        dbg!("######################### 3 ################################");
-        dbg!(message.from());
-        dbg!(message.to());
-        dbg!(self.id());
         self.check_for_duplicate_msg::<storage::ValidPublicShare>(message.from())?;
 
         if !self.can_handle_round_three_msg() {
@@ -883,24 +856,11 @@ impl TshareParticipant {
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
-        // calculate public share from the public coefficients
-        //let public_share = Self::eval_public_share(&decom.coeff_publics, message.from())?;
-        //let public_share = EvalPublic::new(public_share);
-
-        // get the final_public_share from the storage
-        //let public_share = self
-        //    .local_storage
-        //    .retrieve::<storage::ValidPublicShare>(self.id())?;
-        //let precom = self
-        //    .local_storage
-        //    .retrieve::<storage::SchnorrPrecom>(self.id())?;
 
         let mut final_public_share = CurvePoint::IDENTITY;
         for pid in self.all_participants().iter() {
-            let coeff_publics = self
-                .local_storage
-                .retrieve::<storage::PublicCoeffs>(*pid)?;
-            let public_share = Self::eval_public_share(&coeff_publics, message.from())?;
+            let coeff_publics = self.local_storage.retrieve::<storage::PublicCoeffs>(*pid)?;
+            let public_share = Self::eval_public_share(coeff_publics, message.from())?;
             final_public_share = final_public_share + public_share;
         }
 
@@ -917,19 +877,16 @@ impl TshareParticipant {
         self.local_storage
             .store_once::<storage::ValidPublicShare>(message.from(), final_public_share.clone())?;
 
-        self.maybe_finish()
+        self.maybe_finish_protocol()
     }
 
-    fn maybe_finish(&mut self) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+    fn maybe_finish_protocol(
+        &mut self,
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         // Have we validated and stored the public shares from everybody to everybody?
         let got_all_public_shares = self
             .local_storage
             .contains_for_all_ids::<storage::ValidPublicShare>(&self.all_participants());
-
-        // Have we got the private shares from everybody to us?
-        //let got_all_private_shares = self
-        //    .local_storage
-         //   .contains_for_all_ids::<storage::ValidPrivateEval>(&self.all_participants());
 
         // If so, we completed the protocol! Return the outputs.
         if got_all_public_shares {
@@ -941,14 +898,8 @@ impl TshareParticipant {
                 .collect::<Result<Vec<_>>>()?;
             let all_public_coeffs = Self::aggregate_public_coeffs(&coeffs_from_all);
 
-            // Compute the one's own private evaluation.
-            //let from_all_to_me_private = self
-            //    .all_participants()
-            //    .iter()
-            //    .map(|pid| self.local_storage.remove::<storage::ValidPrivateEval>(*pid))
-            //    .collect::<Result<Vec<_>>>()?;
-            
-            // read my_private_share from the storage, it was already aggregated
+            // Read my_private_share from the storage, it was already aggregated in the end
+            // of round 2
             let my_private_share = self
                 .local_storage
                 .retrieve::<storage::ValidPrivateEval>(self.id())?;
@@ -1103,14 +1054,9 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn tshare_always_produces_valid_outputs() -> Result<()> {
-        //for size in 2..4 {
-        //    tshare_produces_valid_outputs(size)?;
-        //}
-
-        // IT WORKS FOR 2
-        //tshare_produces_valid_outputs(2)?;
-        // TODO: IT DOES NOT WORK FOR 3
-        tshare_produces_valid_outputs(3)?;
+        for size in 2..4 {
+            tshare_produces_valid_outputs(size)?;
+        }
         Ok(())
     }
 
