@@ -26,7 +26,7 @@ use crate::{
     protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once,
     tshare::share::EvalPublic,
-    utils::{bn_to_scalar, scalar_to_bn, CurvePoint},
+    utils::{bn_to_scalar, k256_order, scalar_to_bn, CurvePoint},
     zkp::pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
     Identifier, ParticipantConfig,
 };
@@ -54,6 +54,10 @@ mod storage {
     pub(super) struct SchnorrPrecom;
     impl TypeTag for SchnorrPrecom {
         type Value = PiSchPrecommit;
+    }
+    pub(super) struct GlobalChainCode;
+    impl TypeTag for GlobalChainCode {
+        type Value = [u8; 32];
     }
     pub(super) struct GlobalRid;
     impl TypeTag for GlobalRid {
@@ -119,6 +123,16 @@ pub struct TshareParticipant {
     broadcast_participant: BroadcastParticipant,
     /// Status of the protocol execution.
     status: Status,
+}
+
+#[derive(Debug)]
+pub struct ToutofTHelper {
+    pub keygen_outputs:
+        HashMap<ParticipantIdentifier, <KeygenParticipant as ProtocolParticipant>::Output>,
+    pub public_keys: Vec<KeySharePublic>,
+    pub all_participants: Vec<ParticipantIdentifier>,
+    pub rid: [u8; 32],
+    pub chain_code: [u8; 32],
 }
 
 impl ProtocolParticipant for TshareParticipant {
@@ -291,6 +305,8 @@ impl TshareParticipant {
             if let Some(private) = self.input.share() {
                 privates[0] = private.clone();
                 publics[0] = private.to_public();
+            } else {
+                dbg!("ENTROU NO ELSE MESMO");
             }
 
             (privates, publics)
@@ -602,32 +618,37 @@ impl TshareParticipant {
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
         info!("Generating round three tshare messages.");
 
-        // Construct `global rid` out of each participant's `rid`s.
-        let my_rid = self
-            .local_storage
-            .retrieve::<storage::Decommit>(self.id())?
-            .rid;
-        let rids: Vec<[u8; 32]> = self
-            .other_ids()
-            .iter()
-            .map(|&other_participant_id| {
-                let decom = self
-                    .local_storage
-                    .retrieve::<storage::Decommit>(other_participant_id)?;
-                Ok(decom.rid)
-            })
-            .collect::<Result<Vec<[u8; 32]>>>()?;
-        let mut global_rid = my_rid;
-        // xor all the rids together.
-        for rid in rids.iter() {
-            for i in 0..32 {
-                global_rid[i] ^= rid[i];
-            }
+        // Auxiliary macro to xor two 256-bit arrays given as Vectors of 32 bytes
+        macro_rules! xor_256_bits {
+            ($a:expr, $b:expr) => {{
+                let mut result = [0u8; 32];
+                for i in 0..32 {
+                    result[i] = $a[i] ^ $b[i];
+                }
+                result
+            }};
         }
+
+        // Compute the global chain code and random identifier from individual
+        // contributions
+        let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
+        let mut global_chain_code = my_decom.chain_code;
+        let mut global_rid = my_decom.rid;
+        for &other_participant_id in self.other_participant_ids.iter() {
+            let decom = self
+                .local_storage
+                .retrieve::<storage::Decommit>(other_participant_id)?;
+            global_chain_code = xor_256_bits!(global_chain_code, decom.chain_code);
+            global_rid = xor_256_bits!(global_rid, decom.rid);
+        }
+
+        self.local_storage
+            .store::<storage::GlobalChainCode>(self.id, global_chain_code);
         self.local_storage
             .store::<storage::GlobalRid>(self.id(), global_rid);
 
-        let transcript = schnorr_proof_transcript(self.sid(), &global_rid, self.id())?;
+        let transcript =
+            schnorr_proof_transcript(self.sid(), &global_chain_code, &global_rid, self.id())?;
 
         let private_coeffs = self
             .local_storage
@@ -745,12 +766,12 @@ impl TshareParticipant {
     pub fn convert_to_t_out_of_t_shares(
         tshares: HashMap<ParticipantIdentifier, Output>,
         all_participants: Vec<ParticipantIdentifier>,
-        chain_code: [u8; 32],
         rid: [u8; 32],
-    ) -> Result<(
-        HashMap<ParticipantIdentifier, <KeygenParticipant as ProtocolParticipant>::Output>,
-        Vec<KeySharePublic>,
-    )> {
+        chain_code: [u8; 32],
+        sum_tshare_input: Scalar,
+        threshold: usize,
+    ) -> Result<ToutofTHelper> {
+        let real = all_participants.len();
         let mut new_private_shares = HashMap::new();
         let mut public_keys = vec![];
 
@@ -781,12 +802,36 @@ impl TshareParticipant {
             let output = crate::keygen::Output::from_parts(
                 public_keys.clone(),
                 private_key_share,
-                chain_code,
                 rid,
+                chain_code,
             )?;
             assert!(keygen_outputs.insert(pid, output).is_none());
         }
-        Ok((keygen_outputs, public_keys))
+
+        let mut sum_toft_private_shares = keygen_outputs
+            .values()
+            .map(|output| output.private_key_share().as_ref().clone())
+            .fold(BigNumber::zero(), |acc, x| acc + x);
+        sum_toft_private_shares %= k256_order();
+
+        // Check the sum is indeed the sum of original private keys used as input of
+        // tshare reduced mod the order
+        dbg!(real);
+        dbg!(threshold);
+        if real >= threshold {
+            assert_eq!(
+                bn_to_scalar(&sum_toft_private_shares).unwrap(),
+                sum_tshare_input
+            );
+        }
+
+        Ok(ToutofTHelper {
+            keygen_outputs,
+            public_keys,
+            all_participants,
+            rid,
+            chain_code,
+        })
     }
 
     /// Reconstruct the secret from the shares.
@@ -848,6 +893,9 @@ impl TshareParticipant {
         }
         info!("Handling round three tshare broadcast message.");
 
+        let global_chain_code = *self
+            .local_storage
+            .retrieve::<storage::GlobalChainCode>(self.id())?;
         let global_rid = *self
             .local_storage
             .retrieve::<storage::GlobalRid>(self.id())?;
@@ -864,7 +912,8 @@ impl TshareParticipant {
             final_public_share = final_public_share + public_share;
         }
 
-        let mut transcript = schnorr_proof_transcript(self.sid(), &global_rid, message.from())?;
+        let mut transcript =
+            schnorr_proof_transcript(self.sid(), &global_chain_code, &global_rid, message.from())?;
         proof.verify_with_precommit(
             CommonInput::new(&final_public_share),
             &self.retrieve_context(),
@@ -915,10 +964,17 @@ impl TshareParticipant {
             }
             all_public_keys.push(KeySharePublic::new(self.id(), my_public_share));
 
+            let global_chain_code = *self
+                .local_storage
+                .retrieve::<storage::GlobalChainCode>(self.id)?;
+            let global_rid = *self.local_storage.retrieve::<storage::GlobalRid>(self.id)?;
+
             let output = Output::from_parts(
                 all_public_coeffs.clone(),
                 all_public_keys,
                 my_private_share.x,
+                global_chain_code,
+                global_rid,
             )?;
 
             self.status = Status::TerminatedSuccessfully;
@@ -952,11 +1008,13 @@ impl TshareParticipant {
 /// Generate a [`Transcript`] for [`PiSchProof`].
 fn schnorr_proof_transcript(
     sid: Identifier,
+    global_chain_code: &[u8; 32],
     global_rid: &[u8; 32],
     sender_id: ParticipantIdentifier,
 ) -> Result<Transcript> {
     let mut transcript = Transcript::new(b"tshare schnorr");
     transcript.append_message(b"sid", &serialize!(&sid)?);
+    transcript.append_message(b"chain_code", &serialize!(global_chain_code)?);
     transcript.append_message(b"rid", &serialize!(global_rid)?);
     transcript.append_message(b"sender_id", &serialize!(&sender_id)?);
     Ok(transcript)

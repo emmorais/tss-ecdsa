@@ -47,12 +47,12 @@ mod storage {
     impl TypeTag for SchnorrPrecom {
         type Value = PiSchPrecommit;
     }
-    pub(super) struct ChainCode;
-    impl TypeTag for ChainCode {
-        type Value = [u8; 32];
-    }
     pub(super) struct GlobalRid;
     impl TypeTag for GlobalRid {
+        type Value = [u8; 32];
+    }
+    pub(super) struct GlobalChainCode;
+    impl TypeTag for GlobalChainCode {
         type Value = [u8; 32];
     }
     pub(super) struct PrivateKeyshare;
@@ -490,10 +490,8 @@ impl KeygenParticipant {
             global_rid = xor_256_bits!(global_rid, decom.rid);
         }
 
-        // TODO: the global chain_code is determined by the HMAC function, remove from
-        // here
         self.local_storage
-            .store::<storage::ChainCode>(self.id, global_chain_code);
+            .store::<storage::GlobalChainCode>(self.id, global_chain_code);
         self.local_storage
             .store::<storage::GlobalRid>(self.id, global_rid);
         let transcript =
@@ -547,7 +545,9 @@ impl KeygenParticipant {
         }
         let proof = PiSchProof::from_message(message)?;
         let global_rid = *self.local_storage.retrieve::<storage::GlobalRid>(self.id)?;
-        let global_chain_code = *self.local_storage.retrieve::<storage::ChainCode>(self.id)?;
+        let global_chain_code = *self
+            .local_storage
+            .retrieve::<storage::GlobalChainCode>(self.id)?;
         let decom = self
             .local_storage
             .retrieve::<storage::Decommit>(message.from())?;
@@ -585,8 +585,8 @@ impl KeygenParticipant {
             let output = Output::from_parts(
                 public_key_shares,
                 private_key_share,
-                global_chain_code,
                 global_rid,
+                global_chain_code,
             )?;
             Ok(ProcessOutcome::Terminated(output))
         } else {

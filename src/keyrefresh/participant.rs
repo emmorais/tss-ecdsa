@@ -796,13 +796,13 @@ impl KeyrefreshParticipant {
             let my_new_share = my_private_update.apply(self.input.private_key_share());
 
             // Return the output and stop.
-            let chain_code_before = *self.input.keygen_output().chain_code();
             let rid_before = *self.input.keygen_output().rid();
+            let chain_code_before = *self.input.keygen_output().chain_code();
             let output = Output::from_parts(
                 new_public_shares,
                 my_new_share,
-                chain_code_before,
                 rid_before,
+                chain_code_before,
             )?;
 
             // Final validation that the public key of the quorum has not changed. This

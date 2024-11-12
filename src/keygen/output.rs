@@ -23,8 +23,8 @@ use tracing::error;
 pub struct Output {
     public_key_shares: Vec<KeySharePublic>,
     private_key_share: KeySharePrivate,
-    chain_code: [u8; 32],
     rid: [u8; 32],
+    chain_code: [u8; 32],
 }
 
 impl Output {
@@ -68,14 +68,14 @@ impl Output {
         }
     }
 
-    /// Get the chaincode generated during key generation.
-    pub(crate) fn chain_code(&self) -> &[u8; 32] {
-        &self.chain_code
-    }
-
     /// Get the shared randomness generated during key generation.
     pub(crate) fn rid(&self) -> &[u8; 32] {
         &self.rid
+    }
+
+    /// Get the chain code generated during key generation.
+    pub(crate) fn chain_code(&self) -> &[u8; 32] {
+        &self.chain_code
     }
 
     /// Create a new `Output` from its constitutent parts.
@@ -91,8 +91,8 @@ impl Output {
     pub fn from_parts(
         public_key_shares: Vec<KeySharePublic>,
         private_key_share: KeySharePrivate,
-        chain_code: [u8; 32],
         rid: [u8; 32],
+        chain_code: [u8; 32],
     ) -> Result<Self> {
         let pids = public_key_shares
             .iter()
@@ -115,8 +115,8 @@ impl Output {
         Ok(Self {
             public_key_shares,
             private_key_share,
-            chain_code,
             rid,
+            chain_code,
         })
     }
 
@@ -133,8 +133,8 @@ impl Output {
         (
             self.public_key_shares,
             self.private_key_share,
-            self.chain_code,
             self.rid,
+            self.chain_code,
         )
     }
 }
@@ -165,14 +165,14 @@ mod tests {
                 })
                 .unzip();
 
-            let chain_code = rng.gen();
             let rid = rng.gen();
+            let chain_code = rng.gen();
 
             Self::from_parts(
                 public_key_shares,
                 private_key_shares.pop().unwrap(),
-                chain_code,
                 rid,
+                chain_code,
             )
             .unwrap()
         }
@@ -197,8 +197,8 @@ mod tests {
                 })
                 .unzip();
 
-            let chain_code = rng.gen();
             let rid = rng.gen();
+            let chain_code = rng.gen();
 
             private_key_shares
                 .into_iter()
@@ -206,8 +206,8 @@ mod tests {
                     Self::from_parts(
                         public_key_shares.clone(),
                         private_key_share,
-                        chain_code,
                         rid,
+                        chain_code,
                     )
                     .unwrap()
                 })
@@ -223,8 +223,8 @@ mod tests {
             .collect::<Vec<_>>();
         let output = Output::simulate(&pids, rng);
 
-        let (public, private, chain_code, rid) = output.into_parts();
-        assert!(Output::from_parts(public, private, chain_code, rid).is_ok());
+        let (public, private, rid, chain_code) = output.into_parts();
+        assert!(Output::from_parts(public, private, rid, chain_code).is_ok());
     }
 
     #[test]
@@ -244,8 +244,8 @@ mod tests {
         assert!(Output::from_parts(
             output.public_key_shares,
             bad_private_key_share,
-            output.chain_code,
-            output.rid
+            output.rid,
+            output.chain_code
         )
         .is_err())
     }
@@ -271,14 +271,14 @@ mod tests {
             })
             .unzip();
 
-        let chain_code = rng.gen();
         let rid = rng.gen();
+        let chain_code = rng.gen();
 
         assert!(Output::from_parts(
             public_key_shares,
             private_key_shares.pop().unwrap(),
-            chain_code,
-            rid
+            rid,
+            chain_code
         )
         .is_err());
     }
