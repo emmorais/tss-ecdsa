@@ -8,17 +8,19 @@
 
 //! # tss-ecdsa: A library for full-threshold ECDSA key generation and signing
 //!
-//! This work is based on the threshold ECDSA signature scheme described by
+//! This work is based on the threshold ECDSA signature scheme originally described by
 //! Canetti et al.[^cite], using `secp256k1`[^curve] as the elliptic curve. The
-//! implementation is more limited than the cited protocol in several important
-//! ways:
+//! implementation is more limited than the original cited protocol in several
+//! important ways:
 //!
 //! 1. It is full-threshold: _all_ participants holding a share of the private
-//! key must collaborate to produce a signature.
+//! key must collaborate to produce a signature. There is some support for 
+//! t-out-of-n key generation and the start of support for t-out-of-n key 
+//! refresh but it is not complete. 
 //!
-//! 2. It does not implement key refresh. The paper ties this into the aux-info
-//! protocol, but we removed the components that are only used to update the
-//! participants' private key shares.
+//! 2. Key refresh and aux-info are implemented separately from one another.
+//! At the moment, for security after compromise, you *must* run aux-info 
+//! before key refresh.  
 //!
 //! 3. It does not implement identifiable abort. That is, the protocol will
 //! abort if a party misbehaves, but we did not implement the procedures for
@@ -41,8 +43,10 @@
 //! # Usage
 //! The [`Participant`] type is the main driver for protocol execution. A given
 //! `Participant` is parameterized by the subprotocol that it runs:
-//! [`keygen`](`keygen::KeygenParticipant`),
+//! [`keygen`](keygen::KeygenParticipant),
 //! [`auxinfo`](auxinfo::AuxInfoParticipant),
+//! [`keyrefresh`](keyrefresh::KeyrefreshParticipant),
+//! [`tshare`](tshare::TshareParticipant),
 //! [`presign`](presign::PresignParticipant),
 //! [`sign`](sign::SignParticipant) or
 //! [`interactive_sign`](sign::InteractiveSignParticipant).
@@ -87,7 +91,7 @@
 //! properties that channels must maintain and validation that the calling
 //! application must do.
 //!
-//! 2. Secure persistent storage. The protocol is composed of four subprotocols,
+//! 2. Secure persistent storage. The protocol is composed of subprotocols,
 //! each taking input and returning output. The calling application must persist
 //! outputs, provide them as input for subsequent protocol executions, and
 //! delete them at the end of their lifetimes. Some outputs are private values
@@ -166,11 +170,19 @@
 //! A sub-protocol session automatically progresses between rounds; the calling
 //! application does not have to track where within a session the protocol
 //! execution is at a given time.
-//!
+//! 
+//! # Update to CGGMP 
+//! Note that the most recent version of the [CGGMP paper](https://eprint.iacr.org/2021/060.pdf) on
+//! Eprint has made significant departures from the original protocols 
+//! presented in 2020. Since most of the protocols we use are those described
+//! in the original paper, every other link in this crate redirects to that version. 
+//! 
+//! 
+//! 
 //! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos
 //! Makriyannis, and Udi Peled. UC Non-Interactive, Proactive, Threshold ECDSA
 //! with Identifiable Aborts. [EPrint archive,
-//! 2021](https://eprint.iacr.org/2021/060.pdf).
+//! 2021](https://eprint.iacr.org/archive/2021/060/1634824619.pdf).
 //!
 //! [^curve]: Secp256k1. [Bitcoin Wiki,
 //!     2019](https://en.bitcoin.it/wiki/Secp256k1).

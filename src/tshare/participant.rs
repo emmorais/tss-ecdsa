@@ -1,4 +1,4 @@
-//! Types and functions related to the key refresh sub-protocol Participant.
+//! Types and functions related to .
 
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
@@ -82,30 +82,24 @@ mod storage {
 }
 
 /**
+A [`ProtocolParticipant`] that runs the tshare protocol. 
 This is a protocol that converts additive shares to Shamir shares.
 
-Input:
+# Protocol input
 - The threshold `t` of parties needed to reconstruct the shared secret.
 - The auxiliary information for encryption.
-- Optionally, an existing n-out-of-n share to be converted to t-out-of-n.
+- Optionally, an existing n-out-of-n share to be converted to t-out-of-n share. 
 
-Rounds 1:
-- Each participant generates a random polynomial of degree `threshold - 1`.
-    - Alternatively, set an existing additive share as the constant term.
-- Each participant commits to their polynomial.
-
-Rounds 2:
-- Each participant decommits the public form of their polynomial.
-
-Rounds 3:
-- Each participant prove knowledge of their private shares.
-
-Output:
+# Protocol output 
 - The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points).
 The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
 - The private evaluation of the shared polynomial for our participant. `t` of those can reconstruct the secret.
 
-*/
+# 🔒 Storage requirements
+The private_key_share must be stored securely by the calling application, and a best effort should be made to drop it 
+from memory after it's securely stored. The public components (including the byte array and the public key shares) 
+can be stored in the clear.
+**/
 #[derive(Debug)]
 pub struct TshareParticipant {
     /// The current session identifier
@@ -280,7 +274,7 @@ impl TshareParticipant {
     /// Generate the protocol's round one message.
     ///
     /// The outcome is a broadcast message containing a commitment to:
-    /// - shares [`CoeffPublic`] X_ij for all other participants,
+    /// - a verifiable secret sharing of `private` [`CoeffPublic`] X_ij,
     /// - a "pre-commitment" A to a Schnorr proof.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
@@ -291,7 +285,7 @@ impl TshareParticipant {
     ) -> Result<Vec<Message>> {
         info!("Generating round one tshare messages.");
 
-        // Generate shares for all participants.
+        // Generate Feldman's VSS params 
         let (coeff_privates, coeff_publics) = {
             let mut privates = vec![];
             let mut publics = vec![];
@@ -327,11 +321,11 @@ impl TshareParticipant {
             *sch_precom.precommitment(),
         );
 
-        // Store the private coeffs from us to others so we can share them later.
+        // Store the private coeffs from us to others to use for sharing later.
         self.local_storage
             .store::<storage::PrivateCoeffs>(self.id(), coeff_privates);
 
-        // Store the public coeffs from us to others so we can share them later.
+        // Store the public coeffs from us to others to use for sharing later.
         self.local_storage
             .store::<storage::PublicCoeffs>(self.id(), coeff_publics);
 
@@ -355,8 +349,8 @@ impl TshareParticipant {
 
     /// Handle round one messages from the protocol participants.
     ///
-    /// In round one, each participant broadcasts its commitment to its public
-    /// key share and a "precommitment" to a Schnorr proof. Once all such
+    /// In round one, each participant broadcasts its commitment to its initial share of the public
+    /// key and a "precommitment" to a Schnorr proof. Once all such
     /// commitments have been received, this participant will send an opening of
     /// its own commitment to all other parties.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
@@ -422,7 +416,7 @@ impl TshareParticipant {
 
     /// Generate the protocol's round two messages.
     ///
-    /// The outcome is an opening to the commitment generated in round one.
+    /// The outcome is an opening to the commitment generated in round one. Each party then sends out shares corresponding to the polynomial it committed to in the first round. 
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
@@ -611,8 +605,8 @@ impl TshareParticipant {
     /// Generate the protocol's round three messages.
     ///
     /// At this point, we have validated each participant's commitment, and can
-    /// now proceed to constructing a Schnorr proof that this participant knows
-    /// the private value corresponding to its public key share.
+    /// now calculate our final share of the public key and prove we know the
+    /// private share value via Schnorr. 
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
@@ -761,7 +755,8 @@ impl TshareParticipant {
     /// Lagrange coefficient at zero. This is done by the function
     /// `lagrange_coefficient_at_zero`.
     /// Also convert the public tshares in the same way as the private shares.
-    /// Finally a vector of all public keys is returned.
+    /// Finally a vector of all public keys is returned. This needs to be run 
+    /// before presign when using a threshold generated key. 
     #[allow(clippy::type_complexity)]
     pub fn convert_to_t_out_of_t_shares(
         tshares: HashMap<ParticipantIdentifier, Output>,

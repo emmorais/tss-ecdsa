@@ -61,7 +61,7 @@ impl EvalEncrypted {
     }
 }
 
-/// Private coefficient share.
+/// Private coefficient share corresponding to some `CoeffPublic`.
 #[derive(Clone, ZeroizeOnDrop, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoeffPrivate {
     /// A BigNumber element in the range [1, q) representing a polynomial
@@ -146,8 +146,10 @@ impl AsRef<Scalar> for CoeffPrivate {
     }
 }
 
-/// A curve point representing a given [`Participant`](crate::Participant)'s
-/// public key.
+/// A curve point, primarily interpreted as hiding some 
+/// coefficient of known or unknown polynomial depending 
+/// on the context. Also describes angiven [`Participant`](crate::Participant)'s
+/// ECDSA public key share.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoeffPublic {
     X: CurvePoint,
