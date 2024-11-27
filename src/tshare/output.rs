@@ -20,8 +20,8 @@ use tracing::error;
 use super::CoeffPublic;
 
 /// Output type from key generation, including all parties' public key shares,
-/// this party's private key share, and the public commitment to the coeffs
-/// corresponding to the final shamir secret sharing
+/// this party's private key share, and the public commitment to the
+/// coefficients corresponding to the final shamir secret sharing.
 #[derive(Debug, Clone)]
 pub struct Output {
     // Public coefficients for the polynomial
@@ -83,12 +83,12 @@ impl Output {
     /// should not try to form public and private key shares independently.
     ///
     /// The provided components must satisfy the following properties:
-    /// - public_coeffs is a list of group elts corresponding to
-    /// a commitment to a polynomial f that is unknown to any one party
-    /// - public_keys contains ECDSA public key shares of other parties,
-    ///  derived from public_coeffs
-    /// - private_key_share corresponds to f(i) for some i and is this
-    /// party's private ECDSA key share
+    /// - `public_coeffs` is a list of group elements corresponding to a
+    ///   commitment to a polynomial `f` that is unknown to any one party
+    /// - `public_keys` contains ECDSA public key shares of other parties,
+    ///   derived from `public_coeffs`.
+    /// - `private_key_share` corresponds to f(i) for some i and is this party's
+    ///   private ECDSA key share
     /// - The public key shares must be from a unique set of participants.
     pub fn from_parts(
         public_coeffs: Vec<CoeffPublic>,

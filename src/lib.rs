@@ -8,18 +8,18 @@
 
 //! # tss-ecdsa: A library for full-threshold ECDSA key generation and signing
 //!
-//! This work is based on the threshold ECDSA signature scheme originally described by
-//! Canetti et al.[^cite], using `secp256k1`[^curve] as the elliptic curve. The
-//! implementation is more limited than the original cited protocol in several
-//! important ways:
+//! This work is based on the threshold ECDSA signature scheme originally
+//! described by Canetti et al.[^cite], using `secp256k1`[^curve] as the
+//! elliptic curve. The implementation is more limited than the original cited
+//! protocol in several important ways:
 //!
 //! 1. It is full-threshold: _all_ participants holding a share of the private
-//! key must collaborate to produce a signature. There is some support for 
-//! t-out-of-n key generation and the start of support for t-out-of-n key 
-//! refresh but it is not complete. 
+//! key must collaborate to produce a signature. There is some support for
+//! t-out-of-n key generation and the start of support for t-out-of-n key
+//! refresh but it is not complete.
 //!
 //! 2. Key refresh and aux-info are implemented separately from one another.
-//! At the moment, for security after compromise, you *must* run aux-info 
+//! At the moment, for security after compromise, you *must* run aux-info
 //! before key refresh.  
 //!
 //! 3. It does not implement identifiable abort. That is, the protocol will
@@ -170,15 +170,16 @@
 //! A sub-protocol session automatically progresses between rounds; the calling
 //! application does not have to track where within a session the protocol
 //! execution is at a given time.
-//! 
-//! # Update to CGGMP 
+//!
+//! # Update to CGGMP
 //! Note that the most recent version of the [CGGMP paper](https://eprint.iacr.org/2021/060.pdf) on
-//! Eprint has made significant departures from the original protocols 
+//! Eprint has made significant departures from the original protocols
 //! presented in 2020. Since most of the protocols we use are those described
-//! in the original paper, every other link in this crate redirects to that version. 
-//! 
-//! 
-//! 
+//! in the original paper, every other link in this crate redirects to that
+//! version.
+//!
+//!
+//!
 //! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos
 //! Makriyannis, and Udi Peled. UC Non-Interactive, Proactive, Threshold ECDSA
 //! with Identifiable Aborts. [EPrint archive,

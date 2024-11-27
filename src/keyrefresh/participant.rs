@@ -67,7 +67,7 @@ mod storage {
 }
 
 /**
-A [`ProtocolParticipant`] that runs the key refresh protocol. 
+A [`ProtocolParticipant`] that runs the key refresh protocol.
 
 # Protocol input
 - Encryption and decryption keys from the Aux-Info protocol.
@@ -79,7 +79,7 @@ includes:
   participant);
 - A single *updated* private key share for this participant.
 
-This is the same output structure from the keygen protocol. 
+This is the same output structure as the keygen protocol.
 # 🔒 Storage requirements
 The [private key share](crate::keygen::KeySharePrivate) in the output requires secure
 persistent storage.

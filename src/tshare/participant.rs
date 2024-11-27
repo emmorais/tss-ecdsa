@@ -1,4 +1,4 @@
-//! Types and functions related to .
+//! Types and functions related to the tshare protocol.
 
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
@@ -82,22 +82,22 @@ mod storage {
 }
 
 /**
-A [`ProtocolParticipant`] that runs the tshare protocol. 
+A [`ProtocolParticipant`] that runs the tshare protocol.
 This is a protocol that converts additive shares to Shamir shares.
 
 # Protocol input
 - The threshold `t` of parties needed to reconstruct the shared secret.
 - The auxiliary information for encryption.
-- Optionally, an existing n-out-of-n share to be converted to t-out-of-n share. 
+- Optionally, an existing n-out-of-n share to be converted to t-out-of-n share.
 
-# Protocol output 
+# Protocol output
 - The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points).
 The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
 - The private evaluation of the shared polynomial for our participant. `t` of those can reconstruct the secret.
 
 # 🔒 Storage requirements
-The private_key_share must be stored securely by the calling application, and a best effort should be made to drop it 
-from memory after it's securely stored. The public components (including the byte array and the public key shares) 
+The private_key_share must be stored securely by the calling application, and a best effort should be made to drop it
+from memory after it's securely stored. The public components (including the byte array and the public key shares)
 can be stored in the clear.
 **/
 #[derive(Debug)]
@@ -285,7 +285,7 @@ impl TshareParticipant {
     ) -> Result<Vec<Message>> {
         info!("Generating round one tshare messages.");
 
-        // Generate Feldman's VSS params 
+        // Generate Feldman's VSS params
         let (coeff_privates, coeff_publics) = {
             let mut privates = vec![];
             let mut publics = vec![];
@@ -349,10 +349,10 @@ impl TshareParticipant {
 
     /// Handle round one messages from the protocol participants.
     ///
-    /// In round one, each participant broadcasts its commitment to its initial share of the public
-    /// key and a "precommitment" to a Schnorr proof. Once all such
-    /// commitments have been received, this participant will send an opening of
-    /// its own commitment to all other parties.
+    /// In round one, each participant broadcasts its commitment to its initial
+    /// share of the public key and a "precommitment" to a Schnorr proof.
+    /// Once all such commitments have been received, this participant will
+    /// send an opening of its own commitment to all other parties.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
@@ -416,7 +416,9 @@ impl TshareParticipant {
 
     /// Generate the protocol's round two messages.
     ///
-    /// The outcome is an opening to the commitment generated in round one. Each party then sends out shares corresponding to the polynomial it committed to in the first round. 
+    /// The outcome is an opening to the commitment generated in round one. Each
+    /// party then sends out shares corresponding to the polynomial it committed
+    /// to in the first round.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
@@ -606,7 +608,7 @@ impl TshareParticipant {
     ///
     /// At this point, we have validated each participant's commitment, and can
     /// now calculate our final share of the public key and prove we know the
-    /// private share value via Schnorr. 
+    /// private share value via Schnorr.
     #[cfg_attr(feature = "flame_it", flame("tshare"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs(&mut self) -> Result<Vec<Message>> {
@@ -755,8 +757,8 @@ impl TshareParticipant {
     /// Lagrange coefficient at zero. This is done by the function
     /// `lagrange_coefficient_at_zero`.
     /// Also convert the public tshares in the same way as the private shares.
-    /// Finally a vector of all public keys is returned. This needs to be run 
-    /// before presign when using a threshold generated key. 
+    /// Finally a vector of all public keys is returned. This needs to be run
+    /// before presign when using a threshold generated key.
     #[allow(clippy::type_complexity)]
     pub fn convert_to_t_out_of_t_shares(
         tshares: HashMap<ParticipantIdentifier, Output>,

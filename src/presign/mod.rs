@@ -6,14 +6,15 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-//! This module implements the presign protocol, which is the offline pre-processing 
-//! phase when doing non-interactive signing. [^cite]
+//! This module implements the presign protocol, which is the offline
+//! pre-processing phase when doing non-interactive signing. [^cite]
 //!
 //! # High-level protocol description
 //! The goal of the presign protocol is to generate [`PresignRecord`]s for all
 //! protocol participants. The protocol proceeds in four rounds, and utilizes
-//! the [`KeySharePrivate`](crate::keygen::KeySharePrivate) (`xᵢ` in the paper) constructed during the
-//! [`keygen`](crate::keygen::KeygenParticipant) protocol.
+//! the [`KeySharePrivate`](crate::keygen::KeySharePrivate) (`xᵢ` in the paper)
+//! constructed during the [`keygen`](crate::keygen::KeygenParticipant)
+//! protocol.
 //!
 //! 1. In round one, each participant generates two values corresponding to a
 //!    "key share" (`kᵢ` in the paper) and an "exponent share" (`ɣᵢ` in the
@@ -35,7 +36,8 @@
 //!
 //!    - An exponentiation of its exponent share: `Γᵢ = g^{ɣᵢ}`.
 //!    - A "mask" of its exponent share, roughly equal to `(ɣᵢ · Kⱼ)`.
-//!    - A "mask" of its [`KeySharePrivate`](crate::keygen::KeySharePrivate), roughly equal to `(xᵢ · Kⱼ)`.
+//!    - A "mask" of its [`KeySharePrivate`](crate::keygen::KeySharePrivate),
+//!      roughly equal to `(xᵢ · Kⱼ)`.
 //!
 //!    It also attaches relevant zero-knowledge proofs (per participant) that
 //!    the above computations were done correctly.
@@ -51,8 +53,8 @@
 //!      g^{kᵢ ∑ ɣᵢ}`.
 //!    - An "unmasked" exponent share summation multiplied by its own key share:
 //!      `δᵢ = (∑ ɣⱼ) kᵢ`.
-//!    - An "unmasked" [`KeySharePrivate`](crate::keygen::KeySharePrivate) summation multiplied by its own key
-//!      share: `χᵢ = (∑ xⱼ) kᵢ`.
+//!    - An "unmasked" [`KeySharePrivate`](crate::keygen::KeySharePrivate)
+//!      summation multiplied by its own key share: `χᵢ = (∑ xⱼ) kᵢ`.
 //!
 //!    It also attaches a zero-knowledge proof (per participant) that the value
 //!    `Δᵢ` was computed correctly.

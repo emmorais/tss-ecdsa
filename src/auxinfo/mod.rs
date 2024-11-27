@@ -7,9 +7,9 @@
 // of this source tree.
 
 //! This module implements the auxiliary information protocol.[^cite]
-//! 
-//! This protocol produces auxiliary parameters and public/private key pairs 
-//! that are needed to run key refresh and presign. 
+//!
+//! This protocol produces auxiliary parameters and public/private key pairs
+//! that are needed to run key refresh and presign.
 //!
 //! # High-level protocol description
 //! The auxinfo protocol runs in four rounds:

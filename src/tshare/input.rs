@@ -30,14 +30,16 @@ pub struct Input {
 }
 
 impl Input {
-
-    /// Creates [`Input`] that is needed to run the additive to threshold 
-    /// conversion protocol. Currently [`auxinfo`](crate::auxinfo::AuxInfoParticipant)
-    /// is needed to encrypt values. This should be done using symmetric encryption
-    /// in the future or something like the method suggested in the updated CGGMP paper.
-    /// share is the value to use as the party's additive share. threshold specifies how 
-    /// many parties will be needed to reconstruct the individual output shares. Recall
-    /// the input is assumed to be additively shared which is a threshold of n. 
+    /// Creates [`Input`] needed to run the additive to threshold
+    /// conversion protocol.
+    ///
+    /// Currently [`auxinfo`](crate::auxinfo::AuxInfoParticipant)
+    /// is needed to encrypt values. This should be done using symmetric
+    /// encryption in the future or something like the method suggested in
+    /// the updated CGGMP paper. `share` is the value to use as the party's
+    /// additive share. `threshold` specifies how many parties will be
+    /// needed to reconstruct the individual output shares. Recall the input
+    /// is assumed to be additively shared which is a threshold of n.
     pub fn new(
         auxinfo_output: auxinfo::Output,
         share: Option<CoeffPrivate>,

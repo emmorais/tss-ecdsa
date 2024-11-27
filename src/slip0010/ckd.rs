@@ -28,11 +28,11 @@ pub struct CKDInput {
 pub struct CKDOutput {
     /// The chain code, used to generate more child keys.
     pub chain_code: [u8; 32],
-    /// If private_key for `CKDInput` is None, this is equal to a 
-    /// public shift value that should be applied to the public key 
-    /// and used as the shift in [`Input`](crate::sign::Input) to the 
+    /// If private_key for `CKDInput` is None, this is equal to a
+    /// public shift value that should be applied to the public key
+    /// and used as the shift in [`Input`](crate::sign::Input) to the
     /// non-interactive signing protocol.   
-    /// If private_key for `CKDInput` is present, this is the full 
+    /// If private_key for `CKDInput` is present, this is the full
     /// ECDSA private key
     pub private_key: Scalar,
 }
@@ -97,8 +97,8 @@ impl CKDInput {
         chain_code: [u8; 32],
         index: u32,
     ) -> Result<Self, CallerError> {
-        // index provided is for hardened child keys and 
-        // we cannot produce this in the threshold setting, fail 
+        // index provided is for hardened child keys and
+        // we cannot produce this in the threshold setting, fail
         if index >= 0x80000000 {
             Err(CallerError::WrongIndex)
         } else {

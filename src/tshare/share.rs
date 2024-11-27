@@ -146,9 +146,9 @@ impl AsRef<Scalar> for CoeffPrivate {
     }
 }
 
-/// A curve point, primarily interpreted as hiding some 
-/// coefficient of known or unknown polynomial depending 
-/// on the context. Also describes angiven [`Participant`](crate::Participant)'s
+/// A curve point, primarily interpreted as hiding some
+/// coefficient of known or unknown polynomial depending
+/// on the context. Also describes a given [`Participant`](crate::Participant)'s
 /// ECDSA public key share.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoeffPublic {

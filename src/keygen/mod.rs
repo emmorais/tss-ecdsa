@@ -1,8 +1,8 @@
-//! Types and functions related to key generation sub-protocol.[^cite] 
-//! 
-//! It is supposed to produce an ECDSA public key where the private key shares are 
+//! Types and functions related to key generation sub-protocol.[^cite]
+//!
+//! Produces an ECDSA public key where the private key shares are
 //! additively split among n parties.
-//! 
+//!
 //! # High-level protocol description
 //! The key generation protocol runs in four rounds:
 //! - In the first round, each participant broadcasts a commitment to (1) its
