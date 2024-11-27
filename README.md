@@ -4,9 +4,9 @@ This repo is a work-in-progress implementation of Canetti et al.'s threshold ECD
 
 [CGGMP20] R. Canetti, R. Gennaro, S. Goldfeder, N. Makriyannis, and U. Peled. UC non-interactive, proactive,  threshold ECDSA with identifiable aborts. In  ACM CCS 2020, pp. 1769–1787. ACM Press, 2020.
 
-For details, see the [paper](https://eprint.iacr.org/2021/060.pdf).
+For details, see the [paper](https://eprint.iacr.org/archive/2021/060/1634824619.pdf).
 
-Specifically, we are targeting the three-round presigning protocol (with quadratic overhead for identifying faulty actors).
+Specifically, we are targeting the three-round presigning protocol of the original paper (with quadratic overhead for identifying faulty actors).
 
 This codebase is generally intended to be network-agnostic. Programs take messages as input and potentially output some outgoing messages in response. The relaying of these messages is assumed to happen externally. However, a proof-of-concept example of such networking code can be found in examples/network.
 
@@ -24,7 +24,7 @@ You can build GMP from [source](https://gmplib.org/manual/Installing-GMP) or usi
 
 ##  What's Implemented
 
-### Key Generation (Figure 5 of CGGMP20)
+### Key Generation - n out of n (Figure 5 of CGGMP20)
 
 KeyGen generates a threshold signing key, shares of which are distributed to each node. Every node outputs a private key along with the public keys of all other nodes. This only needs to be run once for a given set of nodes. 
 
@@ -36,6 +36,22 @@ Auxinfo generates the auxiliary information (Paillier keys and ring-Pedersen par
 
 Presign is a protocol to calculate pre-signatures, which can be computed before the message to be signed is known. Once a pre-signature is computed, a threshold signature can be easily calculated in one round of interaction. This protocol must be run for every message which is to be signed.
 
+### Key Refresh - n out of n (CGGMP20 Figure 6, minus aux info)
+
+Key refresh is a protocol to re-randomize each parties share of the ECDSA public key. This helps with recovery from compromised parties. In cryptographic literature, this method is used to provide security against a mobile adversary who corrupts up to n-1 parties at any given time but in any given epoch may choose to corrupt different parties. This should be run *after* getting new parameters from Auxinfo upon suspected corruption.
+
+### Key Generation - t out of n ([from extrapolating the paper](ThresholdCGGMP.pdf))
+
+This version of KeyGen generates a threshold key based on Section 1.2.8 **Extension to t-out-of-n Access Structure**. Like the original 
+key generation algorithm, each node gets a private key along with public keys for all other nodes. However, only t nodes are needed to recover the whole private key where t is a movable parameter. While not currently having a public facing api, this can be done by 
+using the Tshare protocol without providing an input share. An example of this type of key generation can be seen in some of the 
+test cases in protocol.rs. 
+
+### HD Wallet support 
+
+The library currently supports creating hierarichical deterministic wallets as specified in SLIP-0010. To be very specific, for threshold ECDSA only non-hardened child keys are supported and the master key cannot be generated from a passphrase. 
+
+
 ### Other
 
 KeyGen, Auxinfo, and Presign are the three protocols needed in order to do threshold signing. All of the zero-knowledge proofs that underpin these protocols have been implemented, as has an echo-broadcast protocol which is needed in order to enforce non-equivocation of message contents.
@@ -44,16 +60,17 @@ protocol.rs contains a test program for running a full protocol instance, which 
 
 ## What's Not Implemented
 
-Currently, the codebase only implements n-out-of-n sharing. While t-out-of-n sharing is not formally specified in the paper, we expect the transformation to be relatively straightforward.
+Currently, the codebase only fully supports n-out-of-n sharing. Partial support for t-out-of-n sharing exists, but key refresh is not yet 
+fully supported and t-out-of-n key generation does not have a clean, public-facing API. 
 
-Additionally, no notions of Identifiable Aborts are implemented. If a node crashes, the protocol will halt until that node comes back online. In addition to implementing the necessary cryptographic checks to identify and attribute malicious behavior, some notion of synchronous timeouts is also required.
-
-Furthermore, the Key Refreshing portion of Auxiliary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
+Additionally, Identifiable Aborts is not fully implemented.  We sometimes report blame when it is easily attributable but we miss many cases and users should not rely on that field to be complete at this point. If a node crashes, the protocol will halt until that node comes back online. In addition to implementing the necessary cryptographic checks to identify and attribute malicious behavior, some notion of synchronous timeouts is also required.
 
 While some thought has been put into handling invalid messages (duplicate messages are ignored, as are some malformed ones), this has not been evaluated fully. Additionally, message authenticity (i.e. that a given message is actually coming from the sender in the "sender" field) is currently assumed to be handled outside of the protocol, by whatever networking code is shuttling messages around.
 
-The current state of identifiable abort is not complete. We sometimes report blame when it is easily attributable but we miss many cases and users should not rely on that field to be complete at this point. 
+### Update to CGGMP 
 
+The reader may notice that the most recent version of the [CGGMP paper](https://eprint.iacr.org/2021/060.pdf) on Eprint has been significantly revamped. The new result is a protocol that simultaneously achieves good round complexity and accountability properties.
+In the future it may make sense to change this implementation to more closely match what is specified there for efficiency reasons. 
 
 ## How to Build and Run
 

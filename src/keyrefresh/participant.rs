@@ -67,7 +67,7 @@ mod storage {
 }
 
 /**
-A [`ProtocolParticipant`] that runs the key refresh protocol[^cite].
+A [`ProtocolParticipant`] that runs the key refresh protocol.
 
 # Protocol input
 - Encryption and decryption keys from the Aux-Info protocol.
@@ -79,32 +79,11 @@ includes:
   participant);
 - A single *updated* private key share for this participant.
 
+This is the same output structure as the keygen protocol.
 # 🔒 Storage requirements
 The [private key share](crate::keygen::KeySharePrivate) in the output requires secure
 persistent storage.
-
-# High-level protocol description
-The key refresh protocol runs in three rounds:
-
-**Round 1**
-Each participant i samples a private key update x_ij for each other
-  participant j. The sum of updates must equal 0. It computes the public key updates X_ij. It prepares a Schnorr message A_i. It broadcasts a commitment to V_i to all its X_ij, A_i, and a blinding factor u_i.
-
-**Round 2**
-Once all commitments have been received, the second round sees each participant open its commitment by broadcasting its X_ij, A_i, u_i.
-
-**Round 3**
-Each participant verifies the received values against the commitments. Then, each participant verifies that the public updates from each other participant sum to the identity point. In the third round, each participant computes a Schnorr proof of knowledge of its private updates x_ij, continuing from its earlier message A_i. Each participant i encrypts the private updates x_ij to their respective recipients j, using the encryption keys from the Aux-Info protocol. Each participant broadcasts the proofs and the ciphertexts to all other participants.
-
-**Output**
-Each participant verifies the proofs of knowledge, and the consistency with the A_j from round 2. Then, each participant i decrypts the updates x_ji received from other participants j, and verifies their consistency with X_ji from round 2. Each participant i computes its updated private key share x_i by adding to it its received updates x_ji. Each participant i computes its updated view of all public key shares X_j by adding to them the corresponding public updates X_ij.
-
-
-[^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos
-Makriyannis, and Udi Peled. UC Non-Interactive, Proactive, Threshold ECDSA
-with Identifiable Aborts. [EPrint archive,
-2021](https://eprint.iacr.org/2021/060.pdf). Figure 6.
-*/
+**/
 #[derive(Debug)]
 pub struct KeyrefreshParticipant {
     /// The current session identifier
@@ -274,7 +253,7 @@ impl KeyrefreshParticipant {
     ///
     /// The outcome is a broadcast message containing a commitment to:
     /// - updates [`KeyUpdatePublic`] X_ij for all other participants,
-    /// - a "pre-commitment" A to a Schnorr proof.
+    /// - "pre-commitments" A_ij for Schnorr proofs.
     #[cfg_attr(feature = "flame_it", flame("keyrefresh"))]
     #[instrument(skip_all, err(Debug))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
