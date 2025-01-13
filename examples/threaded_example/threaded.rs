@@ -25,6 +25,7 @@
 mod utils;
 
 use clap::{command, Parser};
+use itertools::Itertools;
 use rand::{rngs::StdRng, thread_rng, SeedableRng};
 use std::{
     any::Any,
@@ -36,15 +37,18 @@ use std::{
 use tracing::{debug, info, instrument, span, trace, Level};
 use tracing_subscriber::{self, EnvFilter};
 use tss_ecdsa::{
-    auxinfo::AuxInfoParticipant,
-    keygen::{KeygenParticipant, Output},
+    auxinfo::{self, AuxInfoParticipant},
+    keygen::{self, KeygenParticipant, Output},
     messages::Message,
     presign::{self, PresignParticipant},
     sign::{self, SignParticipant},
+    tshare::{self, TshareParticipant},
     Identifier, Participant, ParticipantConfig, ParticipantIdentifier, ProtocolParticipant,
 };
 use utils::{MessageFromWorker, SubProtocol};
 use uuid::Uuid;
+
+const THRESHOLD: usize = 2;
 
 /// A shared session ID must be agreed up on by workers. We use a central
 /// coordinator to assign this session ID to workers.
@@ -59,13 +63,8 @@ struct KeyId(Uuid);
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// Number of participant worker threads to use.
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 3)]
     number_of_workers: usize,
-    /// Number of times to perform each sub-protocol of tss-ecdsa.
-    /// protocol_executions > 1 useful for computing meaningful average
-    /// execution times.
-    #[arg(short, long)]
-    protocol_executions: usize,
 }
 
 /// Generic Storage for outputs of specific sub-protocols. Indexed by a `KeyId`
@@ -84,7 +83,7 @@ impl<P: ProtocolParticipant> StoredOutput<P> {
         self.stored_output.insert(id, store);
     }
 
-    fn retrieve(&mut self, id: &KeyId) -> &P::Output {
+    fn retrieve(&self, id: &KeyId) -> &P::Output {
         self.stored_output.get(id).unwrap()
     }
 
@@ -163,6 +162,10 @@ fn main() -> anyhow::Result<()> {
     let _enter = span.entered();
 
     let num_workers = cli.number_of_workers;
+    assert!(
+        num_workers >= THRESHOLD,
+        "Number of workers must be >= threshold {THRESHOLD}."
+    );
 
     // Channel from workers to main thread (workers use MPSC).
     let (outgoing_tx, workers_rx) = channel::<MessageFromWorker>();
@@ -184,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Coordinator initiates entire protocol.
-    let mut coordinator = Coordinator::new(worker_messages, workers_rx, num_workers);
+    let mut coordinator = Coordinator::new(worker_messages, workers_rx);
     coordinator.tss_ecdsa()?;
 
     Ok(())
@@ -199,23 +202,15 @@ struct Coordinator {
     send_to_workers: WorkerChannels,
     /// Receive messages from worker threads to route to other workers.
     from_workers: Receiver<MessageFromWorker>,
-    /// Total number of Participants/worker threads participating in our
-    /// sub-protocol.
-    total_workers: usize,
 }
 
 impl Coordinator {
     /// Initialize `Coordinator` with the given channels for sending
     /// messages to worker threads.
-    pub fn new(
-        send_to_workers: WorkerChannels,
-        from_workers: Receiver<MessageFromWorker>,
-        total_workers: usize,
-    ) -> Self {
+    pub fn new(send_to_workers: WorkerChannels, from_workers: Receiver<MessageFromWorker>) -> Self {
         Self {
             send_to_workers,
             from_workers,
-            total_workers,
         }
     }
 
@@ -224,6 +219,7 @@ impl Coordinator {
         let key_id = KeyId(Uuid::new_v4());
         self.initiate_sub_protocol(SubProtocol::KeyGeneration, key_id)?;
         self.initiate_sub_protocol(SubProtocol::AuxInfo, key_id)?;
+        self.initiate_sub_protocol(SubProtocol::Tshare, key_id)?;
         self.initiate_sub_protocol(SubProtocol::Presign, key_id)?;
         self.initiate_sub_protocol(SubProtocol::Sign, key_id)?;
 
@@ -242,8 +238,8 @@ impl Coordinator {
             sub_protocol, key_id
         );
 
-        self.start_new_subprotocol(sub_protocol, key_id)?;
-        self.route_worker_messages()?;
+        let n_workers = self.start_new_subprotocol(sub_protocol, key_id)?;
+        self.route_worker_messages(n_workers)?;
 
         info!("Finished sub-protocol: {:?}.", sub_protocol);
         Ok(())
@@ -255,10 +251,12 @@ impl Coordinator {
         &self,
         sub_protocol: SubProtocol,
         key_id: KeyId,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<usize> {
         let sid = SessionId(Identifier::random(&mut thread_rng()));
+        let participants = self.participants(sub_protocol);
 
-        for worker in self.send_to_workers.values() {
+        for pid in &participants {
+            let worker = self.send_to_workers.get(pid).unwrap();
             worker.send(MessageFromCoordinator::NewSubProtocol(
                 sub_protocol,
                 key_id,
@@ -266,7 +264,7 @@ impl Coordinator {
             ))?;
         }
 
-        Ok(())
+        Ok(participants.len())
     }
 
     /// (Helper Method) Receives messages from workers via our
@@ -275,7 +273,7 @@ impl Coordinator {
     ///
     /// Warning: No sender authentication is done while routing messages!
     /// This function trusts workers not to forge messages.
-    fn route_worker_messages(&self) -> anyhow::Result<()> {
+    fn route_worker_messages(&self, n_workers: usize) -> anyhow::Result<()> {
         // # of workers who finished the current sub_protocol.
         let mut sub_protocol_ended = 0;
 
@@ -302,7 +300,7 @@ impl Coordinator {
                     trace!("Worker finished sub-protocol.");
                     // TODO: Finish handling multiple in-flight sub-protocols here #382.
                     sub_protocol_ended += 1;
-                    if sub_protocol_ended == self.total_workers {
+                    if sub_protocol_ended == n_workers {
                         debug!("All workers finished sub-protocol. Entire sub-protocol ended.");
                         break;
                     }
@@ -311,6 +309,24 @@ impl Coordinator {
         }
         Ok(())
     }
+
+    /// Select participants to a given protocol: all, or a threshold quorum.
+    fn participants(&self, sub_protocol: SubProtocol) -> Vec<ParticipantIdentifier> {
+        use SubProtocol::*;
+
+        let pids = self.send_to_workers.keys().cloned().collect_vec();
+        match sub_protocol {
+            KeyGeneration | AuxInfo | Tshare => pids,
+            Presign | Sign => threshold_participants(pids),
+        }
+    }
+}
+
+/// Select a threshold quorum of participants.
+fn threshold_participants(mut pids: Vec<ParticipantIdentifier>) -> Vec<ParticipantIdentifier> {
+    pids.sort();
+    pids.truncate(THRESHOLD);
+    pids
 }
 
 /// Worker participating in tss-ecdsa protocols.
@@ -323,6 +339,8 @@ struct Worker {
     key_gen_material: StoredOutput<KeygenParticipant>,
     /// Outputs of successful aux info.
     aux_info: StoredOutput<AuxInfoParticipant>,
+    /// Outputs of successful tshare.
+    tshares: StoredOutput<TshareParticipant>,
     /// Outputs of successful presign.
     presign_records: StoredOutput<PresignParticipant>,
     /// Signatures generated from successful signing runs.
@@ -339,6 +357,7 @@ impl Worker {
             participants: ParticipantStorage::new(),
             key_gen_material: StoredOutput::new(),
             aux_info: StoredOutput::new(),
+            tshares: StoredOutput::new(),
             presign_records: StoredOutput::new(),
             signatures: StoredOutput::new(),
             outgoing,
@@ -350,14 +369,14 @@ impl Worker {
     #[instrument(skip_all)]
     fn new_sub_protocol<P: ProtocolParticipant + 'static>(
         &mut self,
+        config: ParticipantConfig,
         sid: SessionId,
         inputs: P::Input,
         key_id: KeyId,
     ) -> anyhow::Result<()> {
         let rng = &mut thread_rng();
 
-        let mut participant: Participant<P> =
-            Participant::from_config(self.config.clone(), sid.0, inputs)?;
+        let mut participant: Participant<P> = Participant::from_config(config, sid.0, inputs)?;
         let init_message = participant.initialize_message()?;
 
         // Output will be None.
@@ -405,31 +424,69 @@ impl Worker {
 /// These functions fetch the required inputs from storage.
 impl Worker {
     fn new_keygen(&mut self, sid: SessionId, key_id: KeyId) -> anyhow::Result<()> {
-        self.new_sub_protocol::<KeygenParticipant>(sid, (), key_id)
+        self.new_sub_protocol::<KeygenParticipant>(self.config.clone(), sid, (), key_id)
     }
 
     fn new_auxinfo(&mut self, sid: SessionId, key_id: KeyId) -> anyhow::Result<()> {
         // Note: Missing inputs to aux-info see issues
         // #242 and #243.
         let _output: &Output = self.key_gen_material.retrieve(&key_id);
-        self.new_sub_protocol::<AuxInfoParticipant>(sid, (), key_id)
+        self.new_sub_protocol::<AuxInfoParticipant>(self.config.clone(), sid, (), key_id)
+    }
+
+    fn new_tshare(&mut self, sid: SessionId, key_id: KeyId) -> anyhow::Result<()> {
+        let private_share = self
+            .key_gen_material
+            .retrieve(&key_id)
+            .private_key_share()
+            .try_into()?;
+        let auxinfo_output = self.aux_info.retrieve(&key_id);
+
+        let inputs = tshare::Input::new(auxinfo_output.clone(), Some(private_share), THRESHOLD)?;
+        self.new_sub_protocol::<TshareParticipant>(self.config.clone(), sid, inputs, key_id)
+    }
+
+    /// Pick a quorum of participants. Return the corresponding additive shares.
+    fn make_quorum(
+        &self,
+        key_id: KeyId,
+    ) -> anyhow::Result<(ParticipantConfig, keygen::Output, auxinfo::Output)> {
+        let participants = threshold_participants(self.config.all_participants());
+
+        let keygen_output = self.key_gen_material.retrieve(&key_id);
+        let tshare_output = self.tshares.retrieve(&key_id);
+
+        let config = self.config.filter_participants(&participants);
+
+        let auxinfo_quorum = self
+            .aux_info
+            .retrieve(&key_id)
+            .filter_participants(&participants);
+
+        let keygen_quorum = TshareParticipant::convert_to_t_out_of_t_share(
+            &config,
+            tshare_output,
+            *keygen_output.rid(),
+            *keygen_output.chain_code(),
+        )?;
+
+        Ok((config, keygen_quorum, auxinfo_quorum))
     }
 
     fn new_presign(&mut self, sid: SessionId, key_id: KeyId) -> anyhow::Result<()> {
-        let key_shares = self.key_gen_material.retrieve(&key_id);
-        let auxinfo_output = self.aux_info.retrieve(&key_id);
+        let (config, keygen_quorum, auxinfo_quorum) = self.make_quorum(key_id)?;
 
-        let inputs = presign::Input::new(auxinfo_output.clone(), key_shares.clone())?;
-        self.new_sub_protocol::<PresignParticipant>(sid, inputs, key_id)
+        let inputs = presign::Input::new(auxinfo_quorum, keygen_quorum)?;
+        self.new_sub_protocol::<PresignParticipant>(config, sid, inputs, key_id)
     }
 
     fn new_sign(&mut self, sid: SessionId, key_id: KeyId) -> anyhow::Result<()> {
-        let key_shares = self.key_gen_material.retrieve(&key_id).public_key_shares();
+        let (config, keygen_quorum, _) = self.make_quorum(key_id)?;
+        let key_shares = keygen_quorum.public_key_shares();
         let record = self.presign_records.take(&key_id);
 
-        let threshold = key_shares.len();
-        let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec(), threshold, None);
-        self.new_sub_protocol::<SignParticipant>(sid, inputs, key_id)
+        let inputs = sign::Input::new(b"hello world", record, key_shares.to_vec(), THRESHOLD, None);
+        self.new_sub_protocol::<SignParticipant>(config, sid, inputs, key_id)
     }
 }
 
@@ -449,6 +506,11 @@ impl Worker {
     fn process_auxinfo(&mut self, sid: SessionId, incoming: Message) -> anyhow::Result<()> {
         let (p, key_id) = self.participants.get_mut::<AuxInfoParticipant>(&sid);
         Self::process_message(p, key_id, incoming, &mut self.aux_info, &self.outgoing)
+    }
+
+    fn process_tshare(&mut self, sid: SessionId, incoming: Message) -> anyhow::Result<()> {
+        let (p, key_id) = self.participants.get_mut::<TshareParticipant>(&sid);
+        Self::process_message(p, key_id, incoming, &mut self.tshares, &self.outgoing)
     }
 
     fn process_presign(&mut self, sid: SessionId, incoming: Message) -> anyhow::Result<()> {
@@ -494,6 +556,9 @@ fn participant_worker(
                     SubProtocol::AuxInfo => {
                         worker.process_auxinfo(sid, message)?;
                     }
+                    SubProtocol::Tshare => {
+                        worker.process_tshare(sid, message)?;
+                    }
                     SubProtocol::Presign => worker.process_presign(sid, message)?,
                     SubProtocol::Sign => worker.process_sign(sid, message)?,
                 }
@@ -508,6 +573,9 @@ fn participant_worker(
                     }
                     SubProtocol::AuxInfo => {
                         worker.new_auxinfo(sid, key_id)?;
+                    }
+                    SubProtocol::Tshare => {
+                        worker.new_tshare(sid, key_id)?;
                     }
                     SubProtocol::Presign => {
                         worker.new_presign(sid, key_id)?;
