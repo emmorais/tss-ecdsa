@@ -8,6 +8,7 @@
 
 use crate::{
     auxinfo::AuxInfoPublic,
+    curve::{CurveTrait, ScalarTrait},
     errors::{InternalError, Result},
     messages::{Message, MessageType, PresignMessageType},
     presign::{
@@ -15,13 +16,11 @@ use crate::{
         round_one::PublicBroadcast as RoundOnePublicBroadcast,
         round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
     },
-    utils::CurvePoint,
     zkp::{
         pilog::{CommonInput, PiLogProof},
         Proof,
     },
 };
-use k256::{elliptic_curve::PrimeField, Scalar};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
@@ -30,18 +29,18 @@ use tracing::error;
 use zeroize::ZeroizeOnDrop;
 
 #[derive(Clone, ZeroizeOnDrop)]
-pub(crate) struct Private {
+pub(crate) struct Private<C: CurveTrait> {
     pub k: BigNumber,
-    pub chi: Scalar,
+    pub chi: C::Scalar,
     #[zeroize(skip)]
-    pub Gamma: CurvePoint,
+    pub Gamma: C,
     #[zeroize(skip)]
-    pub delta: Scalar,
+    pub delta: C::Scalar,
     #[zeroize(skip)]
-    pub Delta: CurvePoint,
+    pub Delta: C,
 }
 
-impl Debug for Private {
+impl<C: CurveTrait + Debug> Debug for Private<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Note: delta, Gamma, and Delta are all sent over the network to other
         // parties so I assume they are not actually private data.
@@ -62,21 +61,24 @@ impl Debug for Private {
 /// necessarily valid (i.e., that all the components are valid with respect to
 /// each other); use [`Public::verify`] to check this latter condition.
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct Public {
-    pub delta: Scalar,
-    pub Delta: CurvePoint,
-    pub psi_double_prime: PiLogProof,
+pub(crate) struct Public<C: CurveTrait> {
+    pub delta: C::Scalar,
+    #[serde(bound(deserialize = "C: CurveTrait"))]
+    pub Delta: C,
+    #[serde(bound(deserialize = "C: CurveTrait"))]
+    pub psi_double_prime: PiLogProof<C>,
     /// Gamma value included for convenience
-    pub Gamma: CurvePoint,
+    #[serde(bound(deserialize = "C: CurveTrait"))]
+    pub Gamma: C,
 }
 
-impl Public {
+impl<C: CurveTrait> Public<C> {
     /// Verify the validity of [`Public`] against the prover's [`AuxInfoPublic`]
     /// and [`PublicBroadcast`](crate::presign::round_one::PublicBroadcast)
     /// values.
     pub(crate) fn verify(
         self,
-        context: &ParticipantPresignContext,
+        context: &ParticipantPresignContext<C>,
         verifier_auxinfo_public: &AuxInfoPublic,
         prover_auxinfo_public: &AuxInfoPublic,
         prover_r1_public_broadcast: &RoundOnePublicBroadcast,
@@ -96,7 +98,7 @@ impl Public {
     }
 }
 
-impl TryFrom<&Message> for Public {
+impl<C: CurveTrait> TryFrom<&Message> for Public<C> {
     type Error = InternalError;
 
     fn try_from(message: &Message) -> std::result::Result<Self, Self::Error> {
@@ -106,7 +108,7 @@ impl TryFrom<&Message> for Public {
         // Normal `Scalar` deserialization doesn't check that the value is in range.
         // Here we convert to bytes and back, using the checked `from_repr` method to
         // make sure the value is a valid, canonical Scalar.
-        if Scalar::from_repr(public.delta.to_bytes()).is_none().into() {
+        if C::Scalar::from_bytes(public.delta.to_bytes().as_slice())?.is_none() {
             error!("Deserialized round 3 message `delta` field is out of range");
             Err(InternalError::ProtocolError(Some(message.from())))?
         }
@@ -115,8 +117,8 @@ impl TryFrom<&Message> for Public {
 }
 
 /// Used to bundle the inputs passed to round_three() together
-pub(crate) struct Input {
+pub(crate) struct Input<C> {
     pub auxinfo_public: AuxInfoPublic,
     pub r2_private: RoundTwoPrivate,
-    pub r2_public: RoundTwoPublic,
+    pub r2_public: RoundTwoPublic<C>,
 }

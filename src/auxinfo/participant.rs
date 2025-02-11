@@ -17,16 +17,15 @@ use crate::{
         Output,
     },
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
+    curve::CurveTrait,
     errors::{CallerError, InternalError, Result},
     local_storage::LocalStorage,
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
-    participant::{
-        Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant, Status,
-    },
+    participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, Status},
     protocol::{Identifier, ParticipantIdentifier, ProtocolType, SharedContext},
     ring_pedersen::VerifiedRingPedersen,
-    run_only_once,
+    run_only_once, ProtocolParticipant,
 };
 use rand::{CryptoRng, RngCore};
 use tracing::{debug, error, info, instrument};
@@ -48,9 +47,11 @@ mod storage {
     impl TypeTag for Commit {
         type Value = Commitment;
     }
-    pub(super) struct Decommit;
-    impl TypeTag for Decommit {
-        type Value = CommitmentScheme;
+    pub(super) struct Decommit<C: CurveTrait> {
+        _phantom: std::marker::PhantomData<C>,
+    }
+    impl<C: CurveTrait> TypeTag for Decommit<C> {
+        type Value = CommitmentScheme<C>;
     }
     pub(super) struct GlobalRid;
     impl TypeTag for GlobalRid {
@@ -78,7 +79,7 @@ mod storage {
 /// # 🔒 Storage requirements
 /// The [`AuxInfoPrivate`] output requires secure persistent storage.
 #[derive(Debug)]
-pub struct AuxInfoParticipant {
+pub struct AuxInfoParticipant<C: CurveTrait> {
     /// The current session identifier
     sid: Identifier,
     /// A unique identifier for this participant
@@ -89,12 +90,12 @@ pub struct AuxInfoParticipant {
     /// Local storage for this participant to store secrets
     local_storage: LocalStorage,
     /// Broadcast subprotocol handler
-    broadcast_participant: BroadcastParticipant,
+    broadcast_participant: BroadcastParticipant<C>,
     /// The status of the protocol execution
     status: Status,
 }
 
-impl ProtocolParticipant for AuxInfoParticipant {
+impl<C: CurveTrait> ProtocolParticipant for AuxInfoParticipant<C> {
     type Input = ();
     // The output type includes `AuxInfoPublic` material for all participants
     // (including ourselves) and `AuxInfoPrivate` for ourselves.
@@ -188,8 +189,8 @@ impl ProtocolParticipant for AuxInfoParticipant {
     }
 }
 
-impl InnerProtocolParticipant for AuxInfoParticipant {
-    type Context = SharedContext;
+impl<C: CurveTrait> InnerProtocolParticipant for AuxInfoParticipant<C> {
+    type Context = SharedContext<C>;
 
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
         SharedContext::collect(self)
@@ -208,13 +209,13 @@ impl InnerProtocolParticipant for AuxInfoParticipant {
     }
 }
 
-impl Broadcast for AuxInfoParticipant {
-    fn broadcast_participant(&mut self) -> &mut BroadcastParticipant {
+impl<C: CurveTrait> Broadcast<C> for AuxInfoParticipant<C> {
+    fn broadcast_participant(&mut self) -> &mut BroadcastParticipant<C> {
         &mut self.broadcast_participant
     }
 }
 
-impl AuxInfoParticipant {
+impl<'a, C: CurveTrait> AuxInfoParticipant<C> {
     /// Handle "Ready" messages from the protocol participants.
     ///
     /// Once "Ready" messages have been received from all participants, this
@@ -263,7 +264,7 @@ impl AuxInfoParticipant {
         self.local_storage
             .store::<storage::Commit>(self.id, com.clone());
         self.local_storage
-            .store::<storage::Decommit>(self.id, scheme);
+            .store::<storage::Decommit<C>>(self.id, scheme);
 
         let messages = self.broadcast(
             rng,
@@ -347,7 +348,9 @@ impl AuxInfoParticipant {
             messages.extend_from_slice(&more_messages);
         }
 
-        let decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
+        let decom = self
+            .local_storage
+            .retrieve::<storage::Decommit<C>>(self.id)?;
         let more_messages = self.message_for_other_participants(
             MessageType::Auxinfo(AuxinfoMessageType::R2Decommit),
             decom,
@@ -369,7 +372,7 @@ impl AuxInfoParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
-        self.check_for_duplicate_msg::<storage::Decommit>(message.from())?;
+        self.check_for_duplicate_msg::<storage::Decommit<C>>(message.from())?;
         info!("Handling round two auxinfo message.");
 
         // We must receive all commitments in round 1 before we start processing
@@ -392,7 +395,7 @@ impl AuxInfoParticipant {
             .retrieve::<storage::Commit>(message.from())?;
         scheme.verify(&message.id(), &message.from(), com)?;
         self.local_storage
-            .store_once::<storage::Decommit>(message.from(), scheme)?;
+            .store_once::<storage::Decommit<C>>(message.from(), scheme)?;
 
         // Check if we've received all the decommitments.
         //
@@ -402,7 +405,7 @@ impl AuxInfoParticipant {
         // message.
         let r2_done = self
             .local_storage
-            .contains_for_all_ids::<storage::Decommit>(&self.other_participant_ids);
+            .contains_for_all_ids::<storage::Decommit<C>>(&self.other_participant_ids);
         if r2_done {
             // Generate messages for round 3...
             let round_three_messages =
@@ -444,11 +447,13 @@ impl AuxInfoParticipant {
             .map(|&other_participant_id| {
                 let decom = self
                     .local_storage
-                    .retrieve::<storage::Decommit>(other_participant_id)?;
+                    .retrieve::<storage::Decommit<C>>(other_participant_id)?;
                 Ok(decom.rid())
             })
             .collect::<Result<Vec<[u8; 32]>>>()?;
-        let my_decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
+        let my_decom = self
+            .local_storage
+            .retrieve::<storage::Decommit<C>>(self.id)?;
 
         let mut global_rid = my_decom.rid();
         // xor all the rids together. In principle, many different options for combining
@@ -467,7 +472,7 @@ impl AuxInfoParticipant {
             .iter()
             .map(|&pid| {
                 // Grab the other participant's decommitment record from storage...
-                let verifier_decommit = self.local_storage.retrieve::<storage::Decommit>(pid)?;
+                let verifier_decommit = self.local_storage.retrieve::<storage::Decommit<C>>(pid)?;
                 let setup_params = verifier_decommit.clone().into_public();
                 let params = setup_params.params();
                 let shared_context = &self.retrieve_context();
@@ -498,8 +503,11 @@ impl AuxInfoParticipant {
     #[instrument(skip_all, err(Debug))]
     fn handle_round_three_msg(
         &mut self,
-        message: &Message,
-    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
+        message: &'a Message,
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>>
+    where
+        C: 'a,
+    {
         self.check_for_duplicate_msg::<storage::Public>(message.from())?;
         info!("Handling round three auxinfo message.");
 
@@ -512,7 +520,7 @@ impl AuxInfoParticipant {
         let global_rid = self.local_storage.retrieve::<storage::GlobalRid>(self.id)?;
         let decom = self
             .local_storage
-            .retrieve::<storage::Decommit>(message.from())?;
+            .retrieve::<storage::Decommit<C>>(message.from())?;
 
         let auxinfo_pub = decom.clone().into_public();
         let my_public = self.local_storage.retrieve::<storage::Public>(self.id)?;
@@ -589,11 +597,17 @@ impl AuxInfoParticipant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::testing::init_testing, Identifier, ParticipantConfig};
+    use crate::{
+        curve::TestCurve,
+        participant::{ProcessOutcome, Status},
+        utils::testing::init_testing,
+        Identifier, ParticipantConfig,
+    };
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::HashMap;
+    type SharedContext = super::SharedContext<TestCurve>;
 
-    impl AuxInfoParticipant {
+    impl<C: CurveTrait> AuxInfoParticipant<C> {
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             input: (),
@@ -634,7 +648,7 @@ mod tests {
         }
     }
 
-    fn is_auxinfo_done(quorum: &[AuxInfoParticipant]) -> bool {
+    fn is_auxinfo_done(quorum: &[AuxInfoParticipant<TestCurve>]) -> bool {
         for participant in quorum {
             if *participant.status() != Status::TerminatedSuccessfully {
                 return false;
@@ -648,7 +662,7 @@ mod tests {
     ///
     /// Returns None if there are no messages for the selected participant.
     fn process_messages<R: RngCore + CryptoRng>(
-        quorum: &mut [AuxInfoParticipant],
+        quorum: &mut [AuxInfoParticipant<TestCurve>],
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
         rng: &mut R,
     ) -> Option<(usize, ProcessOutcome<Output>)> {

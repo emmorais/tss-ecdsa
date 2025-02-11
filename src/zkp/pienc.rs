@@ -26,6 +26,7 @@
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/archive/2021/060/1634824619.pdf).
 use crate::{
+    curve::CurveTrait,
     errors::*,
     paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
     parameters::{ELL, EPSILON},
@@ -43,7 +44,7 @@ use tracing::error;
 /// Proof of knowledge of the plaintext value of a ciphertext, where the value
 /// is within a desired range.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PiEncProof {
+pub(crate) struct PiEncProof<C: CurveTrait> {
     /// Commitment to the plaintext value of the ciphertext (`S` in the paper).
     plaintext_commit: Commitment,
     /// Masking ciphertext (`A` in the paper).
@@ -62,6 +63,8 @@ pub(crate) struct PiEncProof {
     /// Response binding the commitment randomness used in the two commitments
     /// (`z3` in the paper).
     randomness_response: MaskedRandomness,
+    /// Phantom data to tie the proof to the curve type.
+    curve: std::marker::PhantomData<C>,
 }
 
 /// Common input and setup parameters known to both the prover and verifier.
@@ -124,7 +127,7 @@ impl<'a> PiEncSecret<'a> {
     }
 }
 
-impl Proof for PiEncProof {
+impl<C: CurveTrait> Proof for PiEncProof<C> {
     type CommonInput<'a> = PiEncInput<'a>;
     type ProverSecret<'b> = PiEncSecret<'b>;
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
@@ -166,7 +169,7 @@ impl Proof for PiEncProof {
         )?;
 
         // ...and generate a challenge from it (aka `e`)
-        let challenge = plusminus_challenge_from_transcript(transcript)?;
+        let challenge = plusminus_challenge_from_transcript::<C>(transcript)?;
 
         // Form proof responses. Each combines one secret value with its mask and the
         // challenge (aka `z1`, `z2`, `z3` respectively)
@@ -184,6 +187,7 @@ impl Proof for PiEncProof {
             plaintext_response,
             nonce_response,
             randomness_response,
+            curve: std::marker::PhantomData,
         };
 
         Ok(proof)
@@ -208,7 +212,7 @@ impl Proof for PiEncProof {
         )?;
 
         // ...generate a challenge, and make sure it matches the one the prover sent.
-        let e = plusminus_challenge_from_transcript(transcript)?;
+        let e = plusminus_challenge_from_transcript::<C>(transcript)?;
         if e != self.challenge {
             error!("Fiat-Shamir didn't verify");
             return Err(InternalError::ProtocolError(None));
@@ -263,7 +267,7 @@ impl Proof for PiEncProof {
     }
 }
 
-impl PiEncProof {
+impl<C: CurveTrait> PiEncProof<C> {
     /// Update the [`Transcript`] with all the commitment values used in the
     /// proof.
     fn fill_transcript(
@@ -293,10 +297,11 @@ impl PiEncProof {
 mod tests {
     use super::*;
     use crate::{
+        curve::{CurveTrait, TestCurve},
         paillier::DecryptionKey,
         utils::{
-            k256_order, random_plusminus, random_plusminus_by_size_with_minimum,
-            random_positive_bn, testing::init_testing,
+            random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn,
+            testing::init_testing,
         },
         zkp::BadContext,
     };
@@ -308,14 +313,14 @@ mod tests {
 
     // Shorthand to avoid putting types for closure arguments.
     // Note: This does not work on closures that capture variables.
-    type ProofTest = fn(PiEncProof, PiEncInput) -> Result<()>;
+    type ProofTest = fn(PiEncProof<TestCurve>, PiEncInput) -> Result<()>;
 
     /// Generate a [`PiEncProof`] and [`PiEncInput`] and pass them to the
     /// `test_code` closure.
     fn with_random_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         plaintext: BigNumber,
-        mut test_code: impl FnMut(PiEncProof, PiEncInput) -> Result<()>,
+        mut test_code: impl FnMut(PiEncProof<TestCurve>, PiEncInput) -> Result<()>,
     ) -> Result<()> {
         let (decryption_key, _, _) = DecryptionKey::new(rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
@@ -358,7 +363,8 @@ mod tests {
 
         let f: ProofTest = |proof, input| {
             let proof_bytes = bincode::serialize(&proof).unwrap();
-            let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
+            let roundtrip_proof: PiEncProof<TestCurve> =
+                bincode::deserialize(&proof_bytes).unwrap();
             let roundtrip_proof_bytes = bincode::serialize(&roundtrip_proof).unwrap();
 
             assert_eq!(proof_bytes, roundtrip_proof_bytes);
@@ -429,7 +435,7 @@ mod tests {
         // `rng` will be borrowed. We make another rng to be captured by the closure.
         let rng2 = &mut StdRng::from_seed(rng.gen());
 
-        let f = |proof: PiEncProof, input: PiEncInput| {
+        let f = |proof: PiEncProof<TestCurve>, input: PiEncInput| {
             // Shorthand for input commitment parameters
             let scheme = input.setup_params.scheme();
 
@@ -466,7 +472,7 @@ mod tests {
             // Bad challenge fails
             {
                 let mut bad_proof = proof.clone();
-                bad_proof.challenge = random_plusminus(rng2, &k256_order());
+                bad_proof.challenge = random_plusminus(rng2, &TestCurve::order());
                 assert_ne!(bad_proof.challenge, proof.challenge);
                 assert!(bad_proof.verify(input, &(), &mut transcript()).is_err());
             }
@@ -521,7 +527,7 @@ mod tests {
         let input = PiEncInput::new(&setup_params, &encryption_key, &ciphertext);
 
         // Correctly formed proof verifies correctly
-        let proof = PiEncProof::prove(
+        let proof: PiEncProof<TestCurve> = PiEncProof::prove(
             input,
             PiEncSecret::new(&plaintext, &nonce),
             &(),
@@ -533,7 +539,7 @@ mod tests {
         // Forming with the wrong plaintext fails
         let wrong_plaintext = random_plusminus_by_size(rng, ELL);
         assert_ne!(wrong_plaintext, plaintext);
-        let proof = PiEncProof::prove(
+        let proof: PiEncProof<TestCurve> = PiEncProof::prove(
             input,
             PiEncSecret::new(&wrong_plaintext, &nonce),
             &(),
@@ -545,7 +551,7 @@ mod tests {
         // Forming with the wrong nonce fails
         let (_, wrong_nonce) = encryption_key.encrypt(rng, &plaintext).unwrap();
         assert_ne!(wrong_nonce, nonce);
-        let proof = PiEncProof::prove(
+        let proof: PiEncProof<TestCurve> = PiEncProof::prove(
             input,
             PiEncSecret::new(&wrong_plaintext, &wrong_nonce),
             &(),
@@ -565,7 +571,7 @@ mod tests {
         let rng2 = &mut StdRng::from_seed(rng.gen());
         let plaintext = random_plusminus_by_size(&mut rng, ELL);
 
-        let verify_tests = |proof: PiEncProof, input: PiEncInput| {
+        let verify_tests = |proof: PiEncProof<TestCurve>, input: PiEncInput| {
             // Verification works on the original input
             assert!(proof.clone().verify(input, &(), &mut transcript()).is_ok());
 

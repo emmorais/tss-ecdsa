@@ -5,20 +5,16 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Debug};
 
 use generic_array::{typenum::U32, GenericArray};
-use k256::{
-    ecdsa::{signature::DigestVerifier, VerifyingKey},
-    elliptic_curve::{ops::Reduce, scalar::IsHigh, subtle::ConditionallySelectable},
-    Scalar, U256,
-};
 use rand::{CryptoRng, RngCore};
 use sha3::{Digest, Keccak256};
 use tracing::{error, info};
 use zeroize::Zeroize;
 
 use crate::{
+    curve::{CurveTrait, ScalarTrait, SignatureTrait, VerifyingKeyTrait},
     errors::{CallerError, InternalError, Result},
     keygen::KeySharePublic,
     local_storage::LocalStorage,
@@ -26,8 +22,7 @@ use crate::{
     participant::{InnerProtocolParticipant, ProcessOutcome, Status},
     protocol::{ProtocolType, SharedContext},
     run_only_once,
-    sign::{non_interactive_sign::share::SignatureShare, Signature},
-    utils::CurvePoint,
+    sign::non_interactive_sign::share::SignatureShare,
     zkp::ProofContext,
     Identifier, ParticipantConfig, ParticipantIdentifier, PresignRecord, ProtocolParticipant,
 };
@@ -45,7 +40,7 @@ use crate::{
 ///
 ///
 /// # Protocol output
-/// Upon successful completion, the participant outputs a [`Signature`].
+/// Upon successful completion, the participant outputs a Signature.
 /// The signature is on the message which was used to produce the provided
 ///   input message digest. It verifies under the public verification key
 /// corresponding to the private signing key used to produce the input
@@ -55,35 +50,35 @@ use crate::{
 /// The [`PresignRecord`] provided as input must be discarded; no copies should
 /// remain after use.
 #[derive(Debug)]
-pub struct SignParticipant {
+pub struct SignParticipant<C: CurveTrait> {
     sid: Identifier,
     storage: LocalStorage,
-    input: Input,
+    input: Input<C>,
     config: ParticipantConfig,
     status: Status,
 }
 
 /// Input for the non-interactive signing protocol.
 #[derive(Debug)]
-pub struct Input {
+pub struct Input<C: CurveTrait> {
     digest: Keccak256,
-    presign_record: PresignRecord,
-    public_key_shares: Vec<KeySharePublic>,
+    presign_record: PresignRecord<C>,
+    public_key_shares: Vec<KeySharePublic<C>>,
     threshold: usize,
-    shift: Option<Scalar>,
+    shift: Option<C::Scalar>,
 }
 
-impl Input {
+impl<C: CurveTrait> Input<C> {
     /// Construct a new input for signing.
     ///
     /// The `public_key_shares` should be the same ones used to generate the
     /// [`PresignRecord`].
     pub fn new(
         message: &[u8],
-        record: PresignRecord,
-        public_key_shares: Vec<KeySharePublic>,
+        record: PresignRecord<C>,
+        public_key_shares: Vec<KeySharePublic<C>>,
         threshold: usize,
-        shift: Option<Scalar>,
+        shift: Option<C::Scalar>,
     ) -> Self {
         Self {
             digest: Keccak256::new_with_prefix(message),
@@ -100,10 +95,10 @@ impl Input {
     /// they receive it, rather that waiting until presigning completes.
     pub(crate) fn new_from_digest(
         digest: Keccak256,
-        record: PresignRecord,
-        public_key_shares: Vec<KeySharePublic>,
+        record: PresignRecord<C>,
+        public_key_shares: Vec<KeySharePublic<C>>,
         threshold: usize,
-        shift: Option<Scalar>,
+        shift: Option<C::Scalar>,
     ) -> Self {
         Self {
             digest,
@@ -115,13 +110,13 @@ impl Input {
     }
 
     /// Retrieve the presign record.
-    pub(crate) fn presign_record(&self) -> &PresignRecord {
+    pub(crate) fn presign_record(&self) -> &PresignRecord<C> {
         &self.presign_record
     }
 
     /// Retrieve the shift value.
-    fn shift_value(&self) -> Scalar {
-        self.shift.unwrap_or(Scalar::ZERO)
+    fn shift_value(&self) -> C::Scalar {
+        self.shift.unwrap_or(C::Scalar::zero())
     }
 
     /// Compute the digest. Note that this forces a clone of the [`Keccak256`]
@@ -131,17 +126,14 @@ impl Input {
     }
 
     /// Compute the public key.
-    pub fn public_key(&self) -> Result<k256::ecdsa::VerifyingKey> {
+    pub fn public_key(&self) -> Result<C::VerifyingKey> {
         // Add up all the key shares
         let public_key_point = self
             .public_key_shares
             .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+            .fold(C::IDENTITY, |sum, share| sum + *share.as_ref());
 
-        VerifyingKey::from_encoded_point(&public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key");
-            CallerError::BadInput.into()
-        })
+        C::VerifyingKey::from_point(public_key_point)
     }
 }
 
@@ -151,12 +143,12 @@ impl Input {
 /// Note that this is only used in the case of identifiable abort, which is not
 /// yet implemented. A correct execution of signing does not involve any ZK
 /// proofs.
-pub(crate) struct SignContext {
-    shared_context: SharedContext,
+pub(crate) struct SignContext<C: CurveTrait> {
+    shared_context: SharedContext<C>,
     message_digest: [u8; 32],
 }
 
-impl ProofContext for SignContext {
+impl<C: CurveTrait> ProofContext for SignContext<C> {
     fn as_bytes(&self) -> Result<Vec<u8>> {
         Ok([
             self.shared_context.as_bytes()?,
@@ -166,9 +158,9 @@ impl ProofContext for SignContext {
     }
 }
 
-impl SignContext {
+impl<C: CurveTrait> SignContext<C> {
     /// Build a [`SignContext`] from a [`SignParticipant`].
-    pub(crate) fn collect(p: &SignParticipant) -> Self {
+    pub(crate) fn collect(p: &SignParticipant<C>) -> Self {
         Self {
             shared_context: SharedContext::collect(p),
             message_digest: p.input.digest_hash().into(),
@@ -177,24 +169,29 @@ impl SignContext {
 }
 
 mod storage {
-    use k256::Scalar;
 
-    use crate::{local_storage::TypeTag, sign::non_interactive_sign::share::SignatureShare};
-
-    pub(super) struct Share;
-    impl TypeTag for Share {
-        type Value = SignatureShare;
+    use crate::{
+        curve::CurveTrait, local_storage::TypeTag,
+        sign::non_interactive_sign::share::SignatureShare,
+    };
+    pub(super) struct Share<C: CurveTrait> {
+        _c: std::marker::PhantomData<C>,
+    }
+    impl<C: CurveTrait> TypeTag for Share<C> {
+        type Value = SignatureShare<C>;
     }
 
-    pub(super) struct XProj;
-    impl TypeTag for XProj {
-        type Value = Scalar;
+    pub(super) struct XProj<C: CurveTrait> {
+        _c: std::marker::PhantomData<C>,
+    }
+    impl<C: CurveTrait> TypeTag for XProj<C> {
+        type Value = C::Scalar;
     }
 }
 
-impl ProtocolParticipant for SignParticipant {
-    type Input = Input;
-    type Output = Signature;
+impl<C: CurveTrait> ProtocolParticipant for SignParticipant<C> {
+    type Input = Input<C>;
+    type Output = C::ECDSASignature;
 
     fn ready_type() -> MessageType {
         MessageType::Sign(SignMessageType::Ready)
@@ -289,8 +286,8 @@ impl ProtocolParticipant for SignParticipant {
     }
 }
 
-impl InnerProtocolParticipant for SignParticipant {
-    type Context = SignContext;
+impl<C: CurveTrait> InnerProtocolParticipant for SignParticipant<C> {
+    type Context = SignContext<C>;
 
     fn retrieve_context(&self) -> Self::Context {
         SignContext::collect(self)
@@ -309,25 +306,22 @@ impl InnerProtocolParticipant for SignParticipant {
     }
 }
 
-impl SignParticipant {
+impl<C: CurveTrait> SignParticipant<C> {
     /// Compute the public key with the shift value applied.
     pub fn shifted_public_key(
         &self,
-        public_key_shares: Vec<KeySharePublic>,
-        shift: Scalar,
-    ) -> Result<VerifyingKey> {
+        public_key_shares: Vec<KeySharePublic<C>>,
+        shift: C::Scalar,
+    ) -> Result<C::VerifyingKey> {
         // Add up all the key shares
         let public_key_point = public_key_shares
             .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+            .fold(C::IDENTITY, |sum, share| sum + *share.as_ref());
 
-        let shifted_point = CurvePoint::GENERATOR.multiply_by_scalar(&shift);
+        let shifted_point = C::GENERATOR.mul(&shift);
         let shifted_public_key_point = public_key_point + shifted_point;
 
-        VerifyingKey::from_encoded_point(&shifted_public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key.");
-            InternalError::InternalInvariantFailed
-        })
+        C::VerifyingKey::from_point(shifted_public_key_point)
     }
 
     /// Handle a "Ready" message from ourselves.
@@ -347,7 +341,7 @@ impl SignParticipant {
         // If our generated share was the last one, complete the protocol.
         if self
             .storage
-            .contains_for_all_ids::<storage::Share>(&self.all_participants())
+            .contains_for_all_ids::<storage::Share<C>>(&self.all_participants())
         {
             let round_one_outcome = self.compute_output()?;
             ready_outcome
@@ -368,16 +362,20 @@ impl SignParticipant {
 
         // Interpret the message digest as an integer mod `q`. This matches the way that
         // the k256 library converts a digest to a scalar.
-        let digest = <Scalar as Reduce<U256>>::reduce_bytes(&self.input.digest_hash());
+        let digest_bytes = self.input.digest_hash();
+        // Compute the digest as a C::Scalar
+        let digest = C::Scalar::from_bytes(&digest_bytes)?.unwrap();
 
         // Compute the x-projection of `R` from the `PresignRecord`
         let x_projection = record.x_projection()?;
 
         // Compute the share
-        let share = SignatureShare::new(
-            record.mask_share() * &digest
-                + x_projection * record.masked_key_share()
-                + x_projection * record.mask_share() * self.input.shift_value(),
+        let share = SignatureShare::<C>::new(
+            record
+                .mask_share()
+                .mul(&digest)
+                .add(&x_projection.mul(record.masked_key_share()))
+                .add(&x_projection.mul(&record.mask_share().mul(&self.input.shift_value()))),
         );
 
         // Erase the presign record
@@ -385,9 +383,9 @@ impl SignParticipant {
 
         // Save pieces for our own use later
         self.storage
-            .store::<storage::Share>(self.id(), share.clone());
+            .store::<storage::Share<C>>(self.id(), share.clone());
         self.storage
-            .store::<storage::XProj>(self.id(), x_projection);
+            .store::<storage::XProj<C>>(self.id(), x_projection);
 
         // Form output messages
         self.message_for_other_participants(
@@ -406,17 +404,17 @@ impl SignParticipant {
             return Ok(ProcessOutcome::Incomplete);
         }
 
-        self.check_for_duplicate_msg::<storage::Share>(message.from())?;
+        self.check_for_duplicate_msg::<storage::Share<C>>(message.from())?;
 
         // Save this signature share
         let share = SignatureShare::try_from(message)?;
         self.storage
-            .store_once::<storage::Share>(message.from(), share)?;
+            .store_once::<storage::Share<C>>(message.from(), share)?;
 
         // If we haven't received shares from all parties, stop here
         if !self
             .storage
-            .contains_for_all_ids::<storage::Share>(&self.all_participants())
+            .contains_for_all_ids::<storage::Share<C>>(&self.all_participants())
         {
             return Ok(ProcessOutcome::Incomplete);
         }
@@ -436,24 +434,31 @@ impl SignParticipant {
         let shares = self
             .all_participants()
             .into_iter()
-            .map(|pid| self.storage.remove::<storage::Share>(pid))
+            .map(|pid| self.storage.remove::<storage::Share<C>>(pid))
             .collect::<Result<Vec<_>>>()?;
 
-        let x_projection = self.storage.remove::<storage::XProj>(self.id())?;
+        let x_projection = self.storage.remove::<storage::XProj<C>>(self.id())?;
 
         // Sum up the signature shares and convert to BIP-0062 format (negating if the
         // sum is > group order /2)
-        let mut sum = shares.into_iter().fold(Scalar::ZERO, |a, b| a + b);
+        let mut sum = shares
+            .into_iter()
+            .fold(C::Scalar::zero(), |a, b| a.add(&b.0));
 
-        sum.conditional_assign(&sum.negate(), sum.is_high());
+        if sum.is_high() {
+            sum = sum.negate();
+        }
 
-        let signature = Signature::try_from_scalars(x_projection, sum)?;
+        let signature = C::ECDSASignature::from_scalars(
+            &C::scalar_to_bn(&x_projection),
+            &C::scalar_to_bn(&sum),
+        )?;
 
         self.shifted_public_key(
             self.input.public_key_shares.clone(),
             self.input.shift_value(),
         )?
-        .verify_digest(self.input.digest.clone(), signature.as_ref())
+        .verify_signature(self.input.digest.clone(), signature)
         .map_err(|e| {
             error!("Failed to verify signature {:?}", e);
             InternalError::ProtocolError(None)
@@ -467,30 +472,34 @@ impl SignParticipant {
 
 #[cfg(test)]
 mod test {
-    use crate::ParticipantIdentifier;
-    use std::collections::HashMap;
+    use crate::{
+        curve::{SignatureTrait, TestCurve, VerifyingKeyTrait},
+        ParticipantIdentifier,
+    };
+    use std::{collections::HashMap, ops::Deref};
 
     use k256::{
-        ecdsa::{signature::DigestVerifier, VerifyingKey},
-        elliptic_curve::{ops::Reduce, scalar::IsHigh, subtle::ConditionallySelectable},
-        Scalar, U256,
+        ecdsa::{signature::DigestVerifier, RecoveryId},
+        elliptic_curve::ops::Reduce,
+        U256,
     };
     use rand::{CryptoRng, Rng, RngCore};
     use sha3::{Digest, Keccak256};
     use tracing::debug;
 
     use crate::{
+        curve::{CurveTrait, ScalarTrait},
         errors::Result,
         keygen,
         messages::{Message, MessageType},
         participant::{ProcessOutcome, Status},
-        presign::PresignRecord,
-        sign::{self, Signature},
-        utils::{bn_to_scalar, testing::init_testing},
+        presign, sign,
+        utils::testing::init_testing,
         Identifier, ParticipantConfig, ProtocolParticipant,
     };
+    type PresignRecord = presign::PresignRecord<TestCurve>;
 
-    use super::SignParticipant;
+    type SignParticipant = super::SignParticipant<TestCurve>;
 
     /// Pick a random incoming message and have the correct participant process
     /// it.
@@ -498,7 +507,10 @@ mod test {
         quorum: &'a mut [SignParticipant],
         inbox: &mut Vec<Message>,
         rng: &mut R,
-    ) -> Option<(&'a SignParticipant, ProcessOutcome<Signature>)> {
+    ) -> Option<(
+        &'a SignParticipant,
+        ProcessOutcome<<TestCurve as CurveTrait>::ECDSASignature>,
+    )> {
         // Pick a random message to process
         if inbox.is_empty() {
             return None;
@@ -534,32 +546,42 @@ mod test {
     fn compute_non_distributed_ecdsa(
         message: &[u8],
         records: &[PresignRecord],
-        keygen_outputs: &[keygen::Output],
-    ) -> k256::ecdsa::Signature {
+        keygen_outputs: &[keygen::Output<TestCurve>],
+    ) -> <TestCurve as CurveTrait>::ECDSASignature {
         let k = records
             .iter()
             .map(|record| record.mask_share())
-            .fold(Scalar::ZERO, |a, b| a + b);
+            .fold(<TestCurve as CurveTrait>::Scalar::zero(), |a, b| a + b);
 
         let secret_key = keygen_outputs
             .iter()
-            .map(|output| bn_to_scalar(output.private_key_share().as_ref()).unwrap())
-            .fold(Scalar::ZERO, |a, b| a + b);
+            .map(|output| TestCurve::bn_to_scalar(output.private_key_share().as_ref()).unwrap())
+            .fold(<TestCurve as CurveTrait>::Scalar::zero(), |a, b| a + b);
 
         let r = records[0].x_projection().unwrap();
 
-        let m = <Scalar as Reduce<U256>>::reduce_bytes(&Keccak256::digest(message));
+        let m = <<TestCurve as CurveTrait>::Scalar as Reduce<U256>>::reduce_bytes(
+            &Keccak256::digest(message),
+        );
 
-        let mut s = k * (m + r * secret_key);
-        s.conditional_assign(&s.negate(), s.is_high());
+        let mut s: <TestCurve as CurveTrait>::Scalar = k * (m + r * secret_key);
 
-        let signature = k256::ecdsa::Signature::from_scalars(r, s).unwrap();
+        if s.is_high() {
+            s = s.negate();
+        }
+
+        let signature = <TestCurve as CurveTrait>::ECDSASignature::from_scalars(
+            &<TestCurve as CurveTrait>::scalar_to_bn(&r),
+            &<TestCurve as CurveTrait>::scalar_to_bn(&s),
+        )
+        .unwrap();
 
         // These checks fail when the overall thing fails
-        let public_key = keygen_outputs[0].public_key().unwrap();
+        let public_key: <TestCurve as CurveTrait>::VerifyingKey =
+            keygen_outputs[0].public_key().unwrap();
 
         assert!(public_key
-            .verify_digest(Keccak256::new_with_prefix(message), &signature)
+            .verify_signature(Keccak256::new_with_prefix(message), signature)
             .is_ok());
         signature
     }
@@ -662,24 +684,23 @@ mod test {
 
         // Make sure the signature we got matches the non-distributed one
         let distributed_sig = &signatures[0];
-        assert_eq!(distributed_sig.as_ref(), &non_distributed_sig);
+        assert_eq!(distributed_sig, &non_distributed_sig);
 
         // Verify that we have a valid signature under the public key for the `message`
         assert!(public_key
-            .verify_digest(digest.clone(), distributed_sig.as_ref())
+            .verify_digest(digest.clone(), distributed_sig.deref())
             .is_ok());
 
         // Check we are able to create a recoverable signature.
-        let recovery_id = distributed_sig
-            .recovery_id(message, public_key)
-            .expect("Recovery ID failed");
-
-        // Re-derive the public key from the recoverable ID and ensure it matches the
-        // original public key.
-        let recovered_pk =
-            VerifyingKey::recover_from_digest(digest, distributed_sig.as_ref(), recovery_id)
-                .unwrap();
-
+        let recid =
+            RecoveryId::trial_recovery_from_digest(public_key, digest.clone(), distributed_sig)
+                .expect("Failed to recover signature");
+        let recovered_pk = <TestCurve as CurveTrait>::VerifyingKey::recover_from_digest(
+            digest,
+            distributed_sig,
+            RecoveryId::from_byte(recid.into()).expect("Invalid recovery ID"),
+        )
+        .unwrap();
         assert_eq!(
             recovered_pk, *public_key,
             "Recovered public key does not match original one."
@@ -709,7 +730,7 @@ mod test {
         // create input
         let message = b"the quick brown fox jumped over the lazy dog";
         let keygen_output = keygen::Output::simulate(&participant_ids, rng);
-        let presign_record = PresignRecord::simulate(rng);
+        let presign_record = PresignRecord::simulate();
         let input = sign::Input::new(
             message,
             presign_record,

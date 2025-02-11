@@ -1,54 +1,50 @@
-// Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
-//
-// This source code is licensed under both the MIT license found in the
-// LICENSE-MIT file in the root directory of this source tree and the Apache
-// License, Version 2.0 found in the LICENSE-APACHE file in the root directory
-// of this source tree.
+//! Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
+//!
+//! This source code is licensed under both the MIT license found in the
+//! LICENSE-MIT file in the root directory of this source tree and the Apache
+//! License, Version 2.0 found in the LICENSE-APACHE file in the root directory
+//! of this source tree.
 
 use std::collections::HashSet;
 
 use crate::{
+    curve::{CurveTrait, VerifyingKeyTrait},
     errors::{CallerError, InternalError, Result},
     keygen::keyshare::{KeySharePrivate, KeySharePublic},
-    utils::CurvePoint,
     ParticipantIdentifier,
 };
 
-use k256::ecdsa::VerifyingKey;
 use tracing::error;
 
 /// Output type from key generation, including all parties' public key shares,
 /// this party's private key share, and a bit of global randomness.
 #[derive(Debug, Clone)]
-pub struct Output {
-    public_key_shares: Vec<KeySharePublic>,
-    private_key_share: KeySharePrivate,
+pub struct Output<C> {
+    public_key_shares: Vec<KeySharePublic<C>>,
+    private_key_share: KeySharePrivate<C>,
     rid: [u8; 32],
     chain_code: [u8; 32],
 }
 
-impl Output {
+impl<C: CurveTrait> Output<C> {
     /// Construct the generated public key.
-    pub fn public_key(&self) -> Result<VerifyingKey> {
+    pub fn public_key(&self) -> Result<C::VerifyingKey> {
         // Add up all the key shares
-        let public_key_point = self
+        let point = self
             .public_key_shares
             .iter()
-            .fold(CurvePoint::IDENTITY, |sum, share| sum + *share.as_ref());
+            .fold(C::IDENTITY, |sum, share| sum + *share.as_ref());
 
-        VerifyingKey::from_encoded_point(&public_key_point.into()).map_err(|_| {
-            error!("Keygen output does not produce a valid public key.");
-            InternalError::InternalInvariantFailed
-        })
+        C::VerifyingKey::from_point(point)
     }
 
     /// Get the individual shares of the public key.
-    pub fn public_key_shares(&self) -> &[KeySharePublic] {
+    pub fn public_key_shares(&self) -> &[KeySharePublic<C>] {
         &self.public_key_shares
     }
 
     /// Get the private key share.
-    pub fn private_key_share(&self) -> &KeySharePrivate {
+    pub fn private_key_share(&self) -> &KeySharePrivate<C> {
         &self.private_key_share
     }
 
@@ -98,8 +94,8 @@ impl Output {
     ///   the private key share must be contained in the list of public shares.
     /// - The public key shares must be from a unique set of participants
     pub fn from_parts(
-        public_key_shares: Vec<KeySharePublic>,
-        private_key_share: KeySharePrivate,
+        public_key_shares: Vec<KeySharePublic<C>>,
+        private_key_share: KeySharePrivate<C>,
         rid: [u8; 32],
         chain_code: [u8; 32],
     ) -> Result<Self> {
@@ -138,7 +134,14 @@ impl Output {
     ///
     /// The public components (including the byte array and the public key
     /// shares) can be stored in the clear.
-    pub fn into_parts(self) -> (Vec<KeySharePublic>, KeySharePrivate, [u8; 32], [u8; 32]) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        Vec<KeySharePublic<C>>,
+        KeySharePrivate<C>,
+        [u8; 32],
+        [u8; 32],
+    ) {
         (
             self.public_key_shares,
             self.private_key_share,
@@ -151,10 +154,12 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::testing::init_testing, ParticipantConfig, ParticipantIdentifier};
+    use crate::{
+        curve::TestCurve, utils::testing::init_testing, ParticipantConfig, ParticipantIdentifier,
+    };
     use rand::{CryptoRng, Rng, RngCore};
 
-    impl Output {
+    impl<C: CurveTrait> Output<C> {
         /// Simulate the valid output of a keygen run with the given
         /// participants.
         ///
@@ -233,7 +238,7 @@ mod tests {
         let output = Output::simulate(&pids, rng);
 
         let (public, private, rid, chain_code) = output.into_parts();
-        assert!(Output::from_parts(public, private, rid, chain_code).is_ok());
+        assert!(Output::<TestCurve>::from_parts(public, private, rid, chain_code).is_ok());
     }
 
     #[test]
@@ -250,7 +255,7 @@ mod tests {
         // the public keys but it's so unlikely that we won't check it.
         let bad_private_key_share = KeySharePrivate::random(rng);
 
-        assert!(Output::from_parts(
+        assert!(Output::<TestCurve>::from_parts(
             output.public_key_shares,
             bad_private_key_share,
             output.rid,
@@ -283,7 +288,7 @@ mod tests {
         let rid = rng.gen();
         let chain_code = rng.gen();
 
-        assert!(Output::from_parts(
+        assert!(Output::<TestCurve>::from_parts(
             public_key_shares,
             private_key_shares.pop().unwrap(),
             rid,

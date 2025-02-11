@@ -220,13 +220,16 @@ pub mod errors;
 
 pub mod auxinfo;
 mod broadcast;
+pub mod curve;
 mod gmp_zeroize;
+pub mod k256;
 pub mod keygen;
 pub mod keyrefresh;
 pub mod keyshare_export;
 mod local_storage;
 mod message_queue;
 pub mod messages;
+pub mod p256;
 mod paillier;
 mod parameters;
 mod participant;

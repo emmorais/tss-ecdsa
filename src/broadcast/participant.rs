@@ -8,6 +8,7 @@
 
 use crate::{
     broadcast::data::BroadcastData,
+    curve::CurveTrait,
     errors::{CallerError, InternalError, Result},
     local_storage::LocalStorage,
     messages::{BroadcastMessageType, Message, MessageType},
@@ -19,7 +20,7 @@ use crate::{
 use crate::participant::Status;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 use tracing::{error, info, instrument};
 
 // Local storage data types.
@@ -34,7 +35,7 @@ mod storage {
 }
 
 #[derive(Debug)]
-pub(crate) struct BroadcastParticipant {
+pub(crate) struct BroadcastParticipant<C: CurveTrait> {
     /// The current session identifier
     sid: Identifier,
     /// A unique identifier for this participant
@@ -46,6 +47,8 @@ pub(crate) struct BroadcastParticipant {
     local_storage: LocalStorage,
     /// Status of the protocol execution
     status: Status,
+    /// Phantom data to pin the curve type
+    _curve: std::marker::PhantomData<C>,
 }
 
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
@@ -84,7 +87,7 @@ impl BroadcastOutput {
     }
 }
 
-impl ProtocolParticipant for BroadcastParticipant {
+impl<C: CurveTrait> ProtocolParticipant for BroadcastParticipant<C> {
     type Input = ();
     type Output = BroadcastOutput;
 
@@ -100,6 +103,7 @@ impl ProtocolParticipant for BroadcastParticipant {
             other_participant_ids,
             local_storage: Default::default(),
             status: Status::Initialized,
+            _curve: PhantomData,
         })
     }
 
@@ -170,8 +174,8 @@ impl ProtocolParticipant for BroadcastParticipant {
     }
 }
 
-impl InnerProtocolParticipant for BroadcastParticipant {
-    type Context = SharedContext;
+impl<C: CurveTrait> InnerProtocolParticipant for BroadcastParticipant<C> {
+    type Context = SharedContext<C>;
 
     /// This method is never used.
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
@@ -191,7 +195,7 @@ impl InnerProtocolParticipant for BroadcastParticipant {
     }
 }
 
-impl BroadcastParticipant {
+impl<C: CurveTrait> BroadcastParticipant<C> {
     #[instrument(skip_all, err(Debug))]
     pub(crate) fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,

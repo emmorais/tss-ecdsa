@@ -7,22 +7,22 @@
 // of this source tree.
 
 use crate::{
+    curve::{CurveTrait, ScalarTrait},
     errors::{
         CallerError,
         InternalError::{InternalInvariantFailed, ProtocolError},
         Result,
     },
     presign::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic},
-    utils::{bn_to_scalar, CurvePoint, ParseBytes},
+    utils::ParseBytes,
 };
-use k256::{elliptic_curve::PrimeField, Scalar};
 use std::fmt::Debug;
 use tracing::error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub(crate) struct RecordPair {
-    pub(crate) private: RoundThreePrivate,
-    pub(crate) publics: Vec<RoundThreePublic>,
+pub(crate) struct RecordPair<C: CurveTrait> {
+    pub(crate) private: RoundThreePrivate<C>,
+    pub(crate) publics: Vec<RoundThreePublic<C>>,
 }
 
 /// The precomputation used to create a partial signature.
@@ -40,10 +40,10 @@ pub(crate) struct RecordPair {
 /// - A curve point (`R` in the paper) representing the point `k^{-1} · G`,
 ///   where `k` is a random integer and `G` denotes the elliptic curve base
 ///   point.
-/// - A [`Scalar`] (`kᵢ` in the paper) representing a share of the random
-///   integer `k^{-1}`.
-/// - A [`Scalar`] (`χᵢ` in the paper) representing a share of `k^{-1} · d_A`,
-///   where `d_A` is the ECDSA secret key.
+/// - A Scalar (`kᵢ` in the paper) representing a share of the random integer
+///   `k^{-1}`.
+/// - A Scalar (`χᵢ` in the paper) representing a share of `k^{-1} · d_A`, where
+///   `d_A` is the ECDSA secret key.
 ///
 /// To produce a signature share of a message digest `m`, we simply compute `kᵢ
 /// m + r χᵢ`, where `r` denotes the x-axis projection of `R`. Note that by
@@ -52,15 +52,15 @@ pub(crate) struct RecordPair {
 ///
 /// [^cite]: [Wikipedia](https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm#Signature_generation_algorithm)
 #[derive(Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
-pub struct PresignRecord {
-    R: CurvePoint,
-    k: Scalar,
-    chi: Scalar,
+pub struct PresignRecord<C: CurveTrait> {
+    R: C,
+    k: C::Scalar,
+    chi: C::Scalar,
 }
 
 const RECORD_TAG: &[u8] = b"Presign Record";
 
-impl Debug for PresignRecord {
+impl<C: CurveTrait> Debug for PresignRecord<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Redacting all the fields because I'm not sure how sensitive they are. If
         // later analysis suggests they're fine to print, please udpate
@@ -73,58 +73,50 @@ impl Debug for PresignRecord {
     }
 }
 
-impl TryFrom<RecordPair> for PresignRecord {
+impl<C: CurveTrait> TryFrom<RecordPair<C>> for PresignRecord<C> {
     type Error = crate::errors::InternalError;
-    fn try_from(RecordPair { private, publics }: RecordPair) -> Result<Self> {
+    fn try_from(RecordPair { private, publics }: RecordPair<C>) -> Result<Self> {
         let mut delta = private.delta;
         let mut Delta = private.Delta;
         for p in publics {
-            delta += &p.delta;
+            delta.add_assign(p.delta);
             Delta = Delta + p.Delta;
         }
 
-        let g = CurvePoint::GENERATOR;
-        if g.multiply_by_scalar(&delta) != Delta {
+        let g = C::GENERATOR;
+        if g.mul(&delta) != Delta {
             error!("Could not create PresignRecord: mismatch between calculated private and public deltas");
             return Err(ProtocolError(None));
         }
 
-        let delta_inv = Option::<Scalar>::from(delta.invert()).ok_or_else(|| {
+        let delta_inv = delta.invert().ok_or_else(|| {
             error!("Could not invert delta as it is 0. Either you got profoundly unlucky or more likely there's a bug");
             InternalInvariantFailed
         })?;
-        let R = private.Gamma.multiply_by_scalar(&delta_inv);
+        let R = private.Gamma.mul(&delta_inv);
 
         Ok(PresignRecord {
             R,
-            k: bn_to_scalar(&private.k)?,
+            k: C::bn_to_scalar(&private.k)?,
             chi: private.chi,
         })
     }
 }
 
-impl PresignRecord {
+impl<C: CurveTrait> PresignRecord<C> {
     /// Get the mask share (`k` in the paper) from the record.
-    pub(crate) fn mask_share(&self) -> &Scalar {
+    pub(crate) fn mask_share(&self) -> &C::Scalar {
         &self.k
     }
 
     /// Get the masked key share (`chi` in the paper) from the record.
-    pub(crate) fn masked_key_share(&self) -> &Scalar {
+    pub(crate) fn masked_key_share(&self) -> &C::Scalar {
         &self.chi
     }
     /// Compute the x-projection of the randomly-selected point `R` from the
     /// [`PresignRecord`].
-    pub(crate) fn x_projection(&self) -> Result<Scalar> {
-        let x_projection = self.R.x_affine();
-
-        // Note: I don't think this is a foolproof transformation. The `from_repr`
-        // method expects a scalar in the range `[0, q)`, but there's no
-        // guarantee that the x-coordinate of `R` will be in that range.
-        Option::from(Scalar::from_repr(x_projection)).ok_or_else(|| {
-            error!("Unable to compute x-projection of curve point: failed to convert x coord to `Scalar`");
-            InternalInvariantFailed
-        })
+    pub(crate) fn x_projection(&self) -> Result<C::Scalar> {
+        self.R.x_projection()
     }
 
     /// Convert private material into bytes.
@@ -185,7 +177,7 @@ impl PresignRecord {
         //    whether parsing succeeded; and
         // 2. We can log the error message once at the end, rather than duplicating it
         //    across all the parsing code
-        let mut parse = || -> Result<PresignRecord> {
+        let mut parse = || -> Result<PresignRecord<C>> {
             // Make sure the RECORD_TAG is correct.
             let actual_tag = parser.take_bytes(RECORD_TAG.len())?;
             if actual_tag != RECORD_TAG {
@@ -195,7 +187,7 @@ impl PresignRecord {
             // Parse the curve point
             let point_len = parser.take_len()?;
             let point_bytes = parser.take_bytes(point_len)?;
-            let point = CurvePoint::try_from_bytes(point_bytes)?;
+            let point = C::try_from_bytes(point_bytes)?;
 
             // Parse the random share `k`
             let random_share_len = parser.take_len()?;
@@ -203,7 +195,7 @@ impl PresignRecord {
             let mut random_share_bytes: [u8; 32] = random_share_slice
                 .try_into()
                 .map_err(|_| CallerError::DeserializationFailed)?;
-            let random_share: Option<_> = Scalar::from_repr(random_share_bytes.into()).into();
+            let random_share: Option<_> = Some(C::Scalar::from_bytes(&random_share_bytes)?);
             random_share_bytes.zeroize();
 
             // Parse the chi share
@@ -215,14 +207,14 @@ impl PresignRecord {
             let mut chi_share_bytes: [u8; 32] = chi_share_slice
                 .try_into()
                 .map_err(|_| CallerError::DeserializationFailed)?;
-            let chi_share: Option<_> = Scalar::from_repr(chi_share_bytes.into()).into();
+            let chi_share = C::Scalar::from_repr(chi_share_bytes.into());
             chi_share_bytes.zeroize();
 
             // The random and chi shares both need to be elements of `F_q`;
             // the k256::Scalar's parsing methods check this for us.
 
             match (random_share, chi_share) {
-                (Some(k), Some(chi)) => Ok(Self { R: point, k, chi }),
+                (Some(Some(k)), chi) => Ok(Self { R: point, k, chi }),
                 _ => Err(CallerError::DeserializationFailed)?,
             }
         };
@@ -249,27 +241,28 @@ impl PresignRecord {
 
 #[cfg(test)]
 mod tests {
-    use k256::{elliptic_curve::Field, Scalar};
-    use rand::{rngs::StdRng, CryptoRng, Rng, RngCore, SeedableRng};
+    use rand::{CryptoRng, RngCore};
 
     use crate::{
+        curve::{CurveTrait, ScalarTrait, TestCurve},
         keygen,
         presign::{participant::presign_record_set_is_valid, record::RECORD_TAG},
-        utils::{bn_to_scalar, testing::init_testing, CurvePoint},
-        ParticipantConfig, PresignRecord,
+        utils::testing::init_testing,
+        ParticipantConfig,
     };
+    type PresignRecord = super::PresignRecord<TestCurve>;
 
     impl PresignRecord {
-        pub(crate) fn mask_point(&self) -> &CurvePoint {
+        pub(crate) fn mask_point(&self) -> &TestCurve {
             &self.R
         }
 
         /// Simulate creation of a random presign record. Do not use outside of
         /// testing.
-        pub(crate) fn simulate(rng: &mut StdRng) -> PresignRecord {
-            let mask_point = CurvePoint::random(StdRng::from_seed(rng.gen()));
-            let mask_share = Scalar::random(StdRng::from_seed(rng.gen()));
-            let masked_key_share = Scalar::random(rng);
+        pub(crate) fn simulate() -> PresignRecord {
+            let mask_point = <TestCurve as CurveTrait>::random();
+            let mask_share = <TestCurve as CurveTrait>::Scalar::random();
+            let masked_key_share = <TestCurve as CurveTrait>::Scalar::random();
 
             PresignRecord {
                 R: mask_point,
@@ -284,24 +277,26 @@ mod tests {
         /// For testing only; this does not check that the keygen output set is
         /// consistent or complete.
         pub(crate) fn simulate_set(
-            keygen_outputs: &[keygen::Output],
-            rng: &mut (impl CryptoRng + RngCore),
+            keygen_outputs: &[keygen::Output<TestCurve>],
+            _rng: &mut (impl CryptoRng + RngCore),
         ) -> Vec<Self> {
             // Note: using slightly-biased generation for faster tests
-            let mask_shares = std::iter::repeat_with(|| Scalar::generate_biased(rng))
+            let mask_shares = std::iter::repeat_with(<TestCurve as CurveTrait>::Scalar::random)
                 .take(keygen_outputs.len())
                 .collect::<Vec<_>>();
-            let mask = mask_shares
-                .iter()
-                .fold(Scalar::ZERO, |sum, mask_share| sum + mask_share);
-            let mask_inversion = Option::<Scalar>::from(mask.invert()).unwrap();
+            let mask = mask_shares.iter().fold(
+                <TestCurve as CurveTrait>::Scalar::zero(),
+                |sum, mask_share| sum + mask_share,
+            );
+            let mask_inversion =
+                Option::<<TestCurve as CurveTrait>::Scalar>::from(mask.invert()).unwrap();
             // `R` in the paper.
-            let mask_point = CurvePoint::GENERATOR.multiply_by_scalar(&mask_inversion);
+            let mask_point = TestCurve::GENERATOR.multiply_by_scalar(&mask_inversion);
 
             // Compute the masked key shares as (secret_key_share * mask)
             let masked_key_shares = keygen_outputs
                 .iter()
-                .map(|output| bn_to_scalar(output.private_key_share().as_ref()).unwrap())
+                .map(|output| TestCurve::bn_to_scalar(output.private_key_share().as_ref()).unwrap())
                 .map(|secret_key_share| secret_key_share * mask);
 
             assert_eq!(masked_key_shares.len(), keygen_outputs.len());
@@ -330,8 +325,7 @@ mod tests {
 
     #[test]
     fn record_bytes_conversion_works() {
-        let rng = &mut init_testing();
-        let record = PresignRecord::simulate(rng);
+        let record = PresignRecord::simulate();
         let clone = PresignRecord { ..record };
 
         let bytes = record.into_bytes();
@@ -343,8 +337,7 @@ mod tests {
 
     #[test]
     fn deserialized_record_tag_must_be_correct() {
-        let rng = &mut init_testing();
-        let record = PresignRecord::simulate(rng);
+        let record = PresignRecord::simulate();
 
         // Cut out the tag from the serialized bytes for convenience.
         let share_bytes = &record.into_bytes()[RECORD_TAG.len()..];
@@ -393,8 +386,7 @@ mod tests {
 
     #[test]
     fn point_field_must_have_length_prepended() {
-        let rng = &mut init_testing();
-        let PresignRecord { R, k, chi } = PresignRecord::simulate(rng);
+        let PresignRecord { R, k, chi } = PresignRecord::simulate();
 
         let point = R.to_bytes();
 
@@ -418,8 +410,7 @@ mod tests {
 
     #[test]
     fn k_field_must_have_length_prepended() {
-        let rng = &mut init_testing();
-        let PresignRecord { R, k, chi } = PresignRecord::simulate(rng);
+        let PresignRecord { R, k, chi } = PresignRecord::simulate();
 
         let point = R.to_bytes();
         let point_len = point.len().to_le_bytes();
@@ -437,8 +428,7 @@ mod tests {
 
     #[test]
     fn chi_field_must_have_length_prepended() {
-        let rng = &mut init_testing();
-        let PresignRecord { R, k, chi } = PresignRecord::simulate(rng);
+        let PresignRecord { R, k, chi } = PresignRecord::simulate();
 
         let point = R.to_bytes();
         let point_len = point.len().to_le_bytes();
@@ -462,14 +452,12 @@ mod tests {
 
     #[test]
     fn deserialized_keyshare_private_requires_all_fields() {
-        let rng = &mut init_testing();
-
         // Part of a tag or the whole tag alone doesn't pass
         let bytes = &RECORD_TAG[..3];
         assert!(PresignRecord::try_from_bytes(bytes.to_vec()).is_err());
         assert!(PresignRecord::try_from_bytes(RECORD_TAG.to_vec()).is_err());
 
-        let PresignRecord { R, k, chi } = PresignRecord::simulate(rng);
+        let PresignRecord { R, k, chi } = PresignRecord::simulate();
 
         let point = R.to_bytes();
         let point_len = point.len().to_le_bytes();

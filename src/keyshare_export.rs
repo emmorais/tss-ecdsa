@@ -1,6 +1,6 @@
 //! Module to export and import key shares, with encryption in transit.
 
-use crate::{errors::Result, keygen::KeySharePrivate};
+use crate::{curve::CurveTrait, errors::Result, keygen::KeySharePrivate};
 
 mod pke;
 pub use pke::Pke;
@@ -40,26 +40,27 @@ impl KeyShareEncrypted {
     /// ```
     /// use tss_ecdsa::keygen::KeySharePrivate;
     /// use tss_ecdsa::keyshare_export::{KeyShareEncrypted, SodiumPke};
+    /// use tss_ecdsa::curve::TestCurve;
     /// use sodiumoxide::crypto::box_;
     ///
     /// sodiumoxide::init().expect("Failed to initialize sodiumoxide");
     /// let (sender_pk, sender_sk) = box_::gen_keypair();
     /// let (receiver_pk, receiver_sk) = box_::gen_keypair();
     /// let mut rng = rand::thread_rng();
-    /// let key_share = KeySharePrivate::random(&mut rng);
+    /// let key_share = KeySharePrivate::<TestCurve>::random(&mut rng);
     ///
-    /// let exported = KeyShareEncrypted::export_keyshare::<SodiumPke>(&key_share, &receiver_pk, &sender_sk)
+    /// let exported = KeyShareEncrypted::export_keyshare::<SodiumPke, TestCurve>(&key_share, &receiver_pk, &sender_sk)
     ///     .expect("Failed to export keyshare");
     /// let exported_bytes = exported.into_vec();
     ///
     /// let to_import = KeyShareEncrypted::from_vec(exported_bytes);
-    /// let imported = to_import.import_keyshare::<SodiumPke>(&sender_pk, &receiver_sk)
+    /// let imported = to_import.import_keyshare::<SodiumPke, TestCurve>(&sender_pk, &receiver_sk)
     ///     .expect("Failed to import keyshare");
     ///
     /// assert_eq!(imported, key_share);
     /// ```
-    pub fn export_keyshare<T: Pke>(
-        key_share: &KeySharePrivate,
+    pub fn export_keyshare<T: Pke, C: CurveTrait>(
+        key_share: &KeySharePrivate<C>,
         receiver_pk: &T::PublicKey,
         sender_sk: &T::SecretKey,
     ) -> Result<Self> {
@@ -80,11 +81,11 @@ impl KeyShareEncrypted {
     /// # Returns
     ///
     /// A `KeySharePrivate` object.
-    pub fn import_keyshare<T: Pke>(
+    pub fn import_keyshare<T: Pke, C: CurveTrait>(
         &self,
         sender_pk: &T::PublicKey,
         receiver_sk: &T::SecretKey,
-    ) -> Result<KeySharePrivate> {
+    ) -> Result<KeySharePrivate<C>> {
         let decrypted_data = T::decrypt(&self.0, sender_pk, receiver_sk)?;
         KeySharePrivate::try_from_bytes(decrypted_data)
     }
@@ -92,6 +93,8 @@ impl KeyShareEncrypted {
 
 #[cfg(test)]
 mod tests {
+    use crate::curve::TestCurve;
+
     use super::*;
     use sodiumoxide::crypto::box_;
 
@@ -109,16 +112,22 @@ mod tests {
         let key_share = KeySharePrivate::random(&mut rng);
 
         // Export the key share using the LibsodiumPke
-        let mut encrypted =
-            KeyShareEncrypted::export_keyshare::<SodiumPke>(&key_share, &receiver_pk, &sender_sk)
-                .expect("Failed to export key share");
+        let mut encrypted = KeyShareEncrypted::export_keyshare::<SodiumPke, TestCurve>(
+            &key_share,
+            &receiver_pk,
+            &sender_sk,
+        )
+        .expect("Failed to export key share");
 
         // Tamper with the nonce to invalidate it
         encrypted.0[0] ^= 0xff;
 
         // Attempt to import the key share (should fail)
-        let result =
-            KeyShareEncrypted::import_keyshare::<SodiumPke>(&encrypted, &sender_pk, &receiver_sk);
+        let result = KeyShareEncrypted::import_keyshare::<SodiumPke, TestCurve>(
+            &encrypted,
+            &sender_pk,
+            &receiver_sk,
+        );
         assert!(result.is_err());
     }
 
@@ -136,16 +145,22 @@ mod tests {
         let key_share = KeySharePrivate::random(&mut rng);
 
         // Export the key share using the LibsodiumPke
-        let mut encrypted =
-            KeyShareEncrypted::export_keyshare::<SodiumPke>(&key_share, &receiver_pk, &sender_sk)
-                .expect("Failed to export key share");
+        let mut encrypted = KeyShareEncrypted::export_keyshare::<SodiumPke, TestCurve>(
+            &key_share,
+            &receiver_pk,
+            &sender_sk,
+        )
+        .expect("Failed to export key share");
 
         // Tamper with the ciphertext to invalidate it
         encrypted.0[box_::NONCEBYTES] ^= 0xff;
 
         // Attempt to import the key share (should fail)
-        let result =
-            KeyShareEncrypted::import_keyshare::<SodiumPke>(&encrypted, &sender_pk, &receiver_sk);
+        let result = KeyShareEncrypted::import_keyshare::<SodiumPke, TestCurve>(
+            &encrypted,
+            &sender_pk,
+            &receiver_sk,
+        );
         assert!(result.is_err());
     }
 }

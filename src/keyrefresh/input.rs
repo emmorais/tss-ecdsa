@@ -10,6 +10,7 @@ use tracing::error;
 
 use crate::{
     auxinfo::{self, AuxInfoPrivate, AuxInfoPublic},
+    curve::CurveTrait,
     errors::{CallerError, InternalError, Result},
     keygen::{self, KeySharePrivate, KeySharePublic},
     ParticipantConfig, ParticipantIdentifier,
@@ -18,18 +19,18 @@ use crate::{
 /// Input needed for a
 /// [`KeyrefreshParticipant`](crate::keyrefresh::KeyrefreshParticipant) to run.
 #[derive(Debug, Clone)]
-pub struct Input {
+pub struct Input<C: CurveTrait> {
     /// The key share material for the key that will be refreshed.
-    keygen_output: keygen::Output,
+    keygen_output: keygen::Output<C>,
     /// The auxiliary info to encrypt/decrypt messages with other participants.
     auxinfo_output: auxinfo::Output,
 }
 
-impl Input {
+impl<C: CurveTrait> Input<C> {
     /// Creates a new [`Input`] from the outputs of the
     /// [`auxinfo`](crate::auxinfo::AuxInfoParticipant) and
     /// [`keygen`](crate::keygen::KeygenParticipant) protocols.
-    pub fn new(auxinfo_output: auxinfo::Output, keygen_output: keygen::Output) -> Result<Self> {
+    pub fn new(auxinfo_output: auxinfo::Output, keygen_output: keygen::Output<C>) -> Result<Self> {
         // The constructors for keygen and auxinfo output already check other important
         // properties, like that the private component maps to one of public
         // components for each one.
@@ -54,7 +55,7 @@ impl Input {
         Ok(input)
     }
 
-    pub fn keygen_output(&self) -> &keygen::Output {
+    pub fn keygen_output(&self) -> &keygen::Output<C> {
         &self.keygen_output
     }
 
@@ -94,7 +95,7 @@ impl Input {
         Ok(())
     }
 
-    pub(crate) fn public_key_shares(&self) -> &[KeySharePublic] {
+    pub(crate) fn public_key_shares(&self) -> &[KeySharePublic<C>] {
         self.keygen_output.public_key_shares()
     }
 
@@ -112,7 +113,7 @@ impl Input {
             })
     }
 
-    pub(crate) fn private_key_share(&self) -> &KeySharePrivate {
+    pub(crate) fn private_key_share(&self) -> &KeySharePrivate<C> {
         self.keygen_output.private_key_share()
     }
 }
@@ -122,6 +123,7 @@ mod test {
     use super::Input;
     use crate::{
         auxinfo,
+        curve::TestCurve,
         errors::{CallerError, InternalError, Result},
         keygen,
         keyrefresh::KeyrefreshParticipant,
@@ -136,7 +138,7 @@ mod test {
         let config = ParticipantConfig::random(5, rng);
         let pids = config.all_participants();
         assert_eq!(pids.last().unwrap(), &config.id());
-        let keygen_output = keygen::Output::simulate(&pids, rng);
+        let keygen_output: keygen::output::Output<TestCurve> = keygen::Output::simulate(&pids, rng);
         let auxinfo_output = auxinfo::Output::simulate(&pids, rng);
 
         // Same length works
@@ -144,7 +146,8 @@ mod test {
         assert!(result.is_ok());
 
         // If keygen is too short, it fails.
-        let short_keygen = keygen::Output::simulate(&pids[1..], rng);
+        let short_keygen: keygen::output::Output<TestCurve> =
+            keygen::Output::simulate(&pids[1..], rng);
         let result = Input::new(auxinfo_output, short_keygen);
         assert!(result.is_err());
         assert_eq!(
@@ -173,7 +176,8 @@ mod test {
         let keygen_pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(5)
             .collect::<Vec<_>>();
-        let keygen_output = keygen::Output::simulate(&keygen_pids, rng);
+        let keygen_output: keygen::output::Output<TestCurve> =
+            keygen::Output::simulate(&keygen_pids, rng);
 
         let result = Input::new(auxinfo_output, keygen_output);
         assert!(result.is_err());
@@ -190,7 +194,8 @@ mod test {
 
         // Create valid input set with random PIDs
         let config = ParticipantConfig::random(5, rng);
-        let keygen_output = keygen::Output::simulate(&config.all_participants(), rng);
+        let keygen_output: keygen::output::Output<TestCurve> =
+            keygen::Output::simulate(&config.all_participants(), rng);
         let auxinfo_output = auxinfo::Output::simulate(&config.all_participants(), rng);
         let input = Input::new(auxinfo_output, keygen_output)?;
 
