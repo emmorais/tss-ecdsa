@@ -56,7 +56,7 @@ criterion = "0.3"
 dialoguer = "0.10"
 env_logger = "0.10.0"
 glass_pumpkin = "1"
-indicatif = "0.16"
+indicatif = "0.17"
 openssl = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
 
