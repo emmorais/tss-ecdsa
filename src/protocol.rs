@@ -923,7 +923,7 @@ mod tests {
         assert!(full_noninteractive_threshold_signing_works(2, 3, 4, 42).is_err());
     }
 
-    struct AuxInfoHelperOutput<C: CurveTrait> {
+    pub struct AuxInfoHelperOutput<C: CurveTrait> {
         auxinfo_outputs:
             HashMap<ParticipantIdentifier, <AuxInfoParticipant<C> as ProtocolParticipant>::Output>,
         inboxes: HashMap<ParticipantIdentifier, Vec<Message>>,
@@ -931,7 +931,7 @@ mod tests {
 
     // Receive as input a vector of configs and return a struct containing
     // the auxinfo outputs and the inboxes
-    fn auxinfo_helper<C: CurveTrait>(
+    pub fn auxinfo_helper<C: CurveTrait>(
         configs: Vec<ParticipantConfig>,
         mut rng: StdRng,
     ) -> Result<AuxInfoHelperOutput<C>> {
@@ -988,14 +988,14 @@ mod tests {
         })
     }
 
-    struct KeygenHelperOutput<C: CurveTrait> {
+    pub struct KeygenHelperOutput<C: CurveTrait> {
         keygen_outputs:
             HashMap<ParticipantIdentifier, <KeygenParticipant<C> as ProtocolParticipant>::Output>,
     }
 
     // Receive as input a vector of configs and the inboxes from auxinfo_helper
     // It returns a struct containing and the keygen outputs
-    fn keygen_helper<C: CurveTrait>(
+    pub fn keygen_helper<C: CurveTrait>(
         configs: Vec<ParticipantConfig>,
         mut inboxes: HashMap<ParticipantIdentifier, Vec<Message>>,
         mut rng: StdRng,
@@ -1044,7 +1044,7 @@ mod tests {
         Ok(KeygenHelperOutput { keygen_outputs })
     }
 
-    struct TshareHelperOutput<C: CurveTrait> {
+    pub struct TshareHelperOutput<C: CurveTrait> {
         tshare_inputs: Vec<tshare::Input<C>>,
         tshare_outputs:
             HashMap<ParticipantIdentifier, <TshareParticipant<C> as ProtocolParticipant>::Output>,
@@ -1052,7 +1052,7 @@ mod tests {
     // Receive as input a vector of configs, the child_index, the auxinfo outputs
     // and the keygen outputs It returns a struct containing and the tshare
     // outputs.
-    fn tshare_helper<C: CurveTrait>(
+    pub fn tshare_helper<C: CurveTrait>(
         configs: Vec<ParticipantConfig>,
         auxinfo_outputs: HashMap<
             ParticipantIdentifier,
@@ -1128,7 +1128,7 @@ mod tests {
 
     // Receives as input the auxinfo outputs and the keygen outputs
     // Returns the presign outputs
-    fn presign_helper<C: CurveTrait>(
+    pub fn presign_helper<C: CurveTrait>(
         configs: Vec<ParticipantConfig>,
         mut auxinfo_outputs: HashMap<
             ParticipantIdentifier,
@@ -1214,7 +1214,7 @@ mod tests {
     // Sign helper receives as input the configs and a special struct containg
     // all the information needed for signature generation.
     // INFO: this function is used to test the full non-interactive signing protocol
-    fn sign_helper<C: CurveTrait>(
+    pub fn sign_helper<C: CurveTrait>(
         configs: Vec<ParticipantConfig>,
         sign_helper_input: SignHelperInput<C>,
         mut rng: StdRng,
@@ -1279,7 +1279,7 @@ mod tests {
     // Sign helper receives as input the configs and a special struct containg
     // all the information needed for signature generation.
     // INFO: this function is used to test the full non-interactive signing protocol
-    fn sign_helper_hd_wallet(
+    pub fn sign_helper_hd_wallet(
         configs: Vec<ParticipantConfig>,
         sign_helper_input: SignHelperInput<K256>,
         mut rng: StdRng,
@@ -1369,7 +1369,7 @@ mod tests {
     // When a threshold protocol is run, it is necessary to adjust the auxinfo
     // so that only the participants in the protocol are included in the
     // auxinfo outputs
-    fn adjust_auxinfo(
+    pub fn adjust_auxinfo(
         all_participants: &[ParticipantIdentifier],
         auxinfo_outputs: HashMap<ParticipantIdentifier, auxinfo::Output>,
     ) -> Result<HashMap<ParticipantIdentifier, auxinfo::Output>> {
@@ -1395,7 +1395,7 @@ mod tests {
         Ok(auxinfo_outputs_presign)
     }
 
-    fn basic_noninteractive_signing_works<C: CurveTrait>(
+    pub fn basic_noninteractive_signing_works<C: CurveTrait>(
         n: usize, // Total number of participants in the protocol
     ) -> Result<()> {
         let mut rng = init_testing();
