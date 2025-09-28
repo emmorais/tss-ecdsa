@@ -121,6 +121,7 @@ pub struct TshareParticipant<C: CurveTrait> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ToutofTHelper<C> {
     pub keygen_outputs: HashMap<ParticipantIdentifier, keygen::Output<C>>,
     pub public_keys: Vec<KeySharePublic<C>>,
