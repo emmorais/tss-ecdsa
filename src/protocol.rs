@@ -229,7 +229,8 @@ impl<P: ProtocolParticipant> Participant<P> {
     }
 }
 
-pub(crate) mod participant_config {
+/// Participant configuration.
+pub mod participant_config {
     use super::*;
 
     /// The configuration for the participant.
