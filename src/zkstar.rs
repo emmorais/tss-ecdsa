@@ -24,7 +24,7 @@ impl ZStarNBuilder {
     /// respect to the current [`ZStarNBuilder`]. This is one of two ways of
     /// constructing elements of [`ZStarN`]. The other way is by randomly
     /// sampling the element in the multiplicative group modulo n.
-    pub fn validate(&self, unverified: ZStarNUnverified) -> Result<ZStarN, InternalError> {
+    pub fn validate(&self, unverified: ZStarNUnverified) -> Result<ZStarN<'_>, InternalError> {
         if unverified.value().is_zero() {
             error!("Elements of the multiplicative group  ZK*_N cannot be zero");
             return Err(InternalError::ProtocolError(None));

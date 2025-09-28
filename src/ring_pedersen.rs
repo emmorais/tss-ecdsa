@@ -196,7 +196,7 @@ impl RingPedersen {
     /// scheme, alongside two secret parameters used in its derivation:
     /// 1. The value `λ` such that [`s`](RingPedersen::s)` =
     /// `[`t`](RingPedersen::t)`^λ mod N`. 2. The Euler's totient of
-    /// [`N`](RingPedersen::modulus).
+    ///    [`N`](RingPedersen::modulus).
     pub(crate) fn extract(
         sk: &DecryptionKey,
         rng: &mut (impl RngCore + CryptoRng),

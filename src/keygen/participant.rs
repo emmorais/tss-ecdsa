@@ -610,6 +610,7 @@ mod tests {
     use tracing::debug;
 
     impl KeygenParticipant<C> {
+        /// Create a new random keygen quorum of the given size.
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             quorum_size: usize,
@@ -621,6 +622,7 @@ mod tests {
                 .collect::<Result<Vec<_>>>()
         }
 
+        /// Create the initial "Ready" message to start the keygen protocol.
         pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Result<Message> {
             let empty: [u8; 0] = [];
             Message::new(

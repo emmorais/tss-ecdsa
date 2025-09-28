@@ -608,6 +608,7 @@ mod tests {
     type SharedContext = super::SharedContext<TestCurve>;
 
     impl<C: CurveTrait> AuxInfoParticipant<C> {
+        /// Create a new random auxinfo quorum of the given size.
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             input: (),
@@ -620,6 +621,7 @@ mod tests {
                 .collect::<Result<Vec<_>>>()
         }
 
+        /// Create the initial "Ready" message to start the protocol.
         pub fn initialize_auxinfo_message(
             &self,
             auxinfo_identifier: Identifier,

@@ -425,7 +425,7 @@ pub(crate) mod prime_gen {
     pub(crate) fn try_get_prime_from_pool_insecure<R: RngCore + CryptoRng>(
         rng: &mut R,
     ) -> Result<BigNumber> {
-        if POOL_OF_PRIMES.len() == 0 {
+        if POOL_OF_PRIMES.is_empty() {
             Err(PaillierError::NoPregeneratedPrimes(PRIME_BITS))?;
         }
         POOL_OF_PRIMES

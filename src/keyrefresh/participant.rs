@@ -874,6 +874,7 @@ mod tests {
     use tracing::debug;
 
     impl<C: CurveTrait> KeyrefreshParticipant<C> {
+        /// Create a new quorum of participants with random inputs.
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             quorum_size: usize,
@@ -894,6 +895,7 @@ mod tests {
                 .collect::<Result<Vec<_>>>()
         }
 
+        /// Create the initial "Ready" message to start the protocol.
         pub fn initialize_keyrefresh_message(
             &self,
             keyrefresh_identifier: Identifier,

@@ -18,10 +18,10 @@
 //!
 //! ## References
 //! 1. Recommendation for Key Management, Special Publication 800-57 Part 1 Rev.
-//! 5, NIST, 05/2020.    Interpreted via [keylength.org](https://www.keylength.com/en/compare/).
+//!    5, NIST, 05/2020.    Interpreted via [keylength.org](https://www.keylength.com/en/compare/).
 //! 2. UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
-//! Ran Canetti,    Rosario Gennaro, Steven Goldfeder, Nikolao Makriyannis, Udi
-//! Peled. EPrint version, Oct 2021.    [PDF](https://eprint.iacr.org/2021/060.pdf)
+//!    Ran Canetti,    Rosario Gennaro, Steven Goldfeder, Nikolao Makriyannis, Udi
+//!    Peled. EPrint version, Oct 2021.    [PDF](https://eprint.iacr.org/2021/060.pdf)
 
 /// Security parameter κ defines the message size of an elliptic curve group
 /// element, and is also used to derive other parameter sizes.

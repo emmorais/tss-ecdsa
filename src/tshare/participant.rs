@@ -93,7 +93,7 @@ This is a protocol that converts additive shares to Shamir shares.
 
 # Protocol output
 - The public commitment to the shared polynomial. It is represented in coefficients form in the exponent (EC points).
-The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
+  The constant term corresponds to the shared value. This can be used to evaluate the commitment to the share of any participant.
 - The private evaluation of the shared polynomial for our participant. `t` of those can reconstruct the secret.
 
 # 🔒 Storage requirements
@@ -1097,6 +1097,7 @@ pub(crate) mod tests {
     }
 
     impl<C: CurveTrait> TshareParticipant<C> {
+        /// Create a new random tshare quorum of the given size.
         pub fn new_quorum<R: RngCore + CryptoRng>(
             sid: Identifier,
             quorum_size: usize,
@@ -1117,6 +1118,7 @@ pub(crate) mod tests {
                 .collect::<Result<Vec<_>>>()
         }
 
+        /// Initializes a Tshare message for the participant.
         pub fn initialize_tshare_message(&self, tshare_identifier: Identifier) -> Result<Message> {
             let empty: [u8; 0] = [];
             Message::new(

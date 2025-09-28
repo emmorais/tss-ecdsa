@@ -105,7 +105,7 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
 
     // Benchmark keygen
     let keygen_sid = Identifier::random(&mut rng);
-    let keygen_inputs = std::iter::repeat(()).take(num_players).collect::<Vec<_>>();
+    let keygen_inputs = std::iter::repeat_n((), num_players).collect::<Vec<_>>();
     c.bench_function(&format!("Keygen with {num_players} nodes"), |b| {
         b.iter(|| {
             run_subprotocol::<KeygenParticipant<TestCurve>>(keygen_sid, keygen_inputs.clone())
@@ -114,7 +114,7 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
 
     // Benchmark auxinfo
     let auxinfo_sid = Identifier::random(&mut rng);
-    let auxinfo_inputs = std::iter::repeat(()).take(num_players).collect::<Vec<_>>();
+    let auxinfo_inputs = std::iter::repeat_n((), num_players).collect::<Vec<_>>();
     c.bench_function(&format!("Auxinfo with {num_players} nodes"), |b| {
         b.iter(|| {
             run_subprotocol::<AuxInfoParticipant<TestCurve>>(auxinfo_sid, auxinfo_inputs.clone())
@@ -123,12 +123,12 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
 
     // Prepare to benchmark presign:
     // 1. Run keygen and get outputs
-    let keygen_inputs = std::iter::repeat(()).take(num_players).collect();
+    let keygen_inputs = std::iter::repeat_n((), num_players).collect();
     let keygen_outputs =
         run_subprotocol::<KeygenParticipant<TestCurve>>(keygen_sid, keygen_inputs).unwrap();
 
     // 2. Run auxinfo and get outputs
-    let auxinfo_inputs = std::iter::repeat(()).take(num_players).collect();
+    let auxinfo_inputs = std::iter::repeat_n((), num_players).collect();
     let auxinfo_outputs =
         run_subprotocol::<AuxInfoParticipant<TestCurve>>(auxinfo_sid, auxinfo_inputs).unwrap();
 

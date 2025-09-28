@@ -164,7 +164,7 @@ impl Proof for PiPrmProof {
             .into_iter()
             .zip(&self.responses)
             .zip(&self.commitments)
-            .map(|((e, z), a)| {
+            .all(|((e, z), a)| {
                 // Verify that `t^{z_i} = {A_i} * s^{e_i} mod N`.
                 let lhs = modpow(input.t(), z, input.modulus());
                 let rhs = if e % 2 == 1 {
@@ -173,8 +173,7 @@ impl Proof for PiPrmProof {
                     a.clone()
                 };
                 lhs == rhs
-            })
-            .all(|check| check);
+            });
 
         if !is_sound {
             error!("response validation check failed");

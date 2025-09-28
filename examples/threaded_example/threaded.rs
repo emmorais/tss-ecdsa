@@ -145,11 +145,11 @@ type WorkerChannels = HashMap<ParticipantIdentifier, Sender<MessageFromCoordinat
 
 /// 1) Set up logging.
 /// 2) Create MPSC channels for communication between the workers and main
-/// thread.
-/// 3) Spawns N participant/worker threads ensuring the channels are
-/// "connected" properly.
-/// 4) Main thread initiates the entire [`tss_ecdsa`]
-/// protocol to sign a message.
+///    thread.
+/// 3) Spawns N participant/worker threads ensuring the channels are "connected"
+///    properly.
+/// 4) Main thread initiates the entire [`tss_ecdsa`] protocol to sign a
+///    message.
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     // Set up logging.
