@@ -233,7 +233,7 @@ mod paillier;
 mod parameters;
 mod participant;
 pub mod presign;
-mod protocol;
+pub mod protocol;
 mod ring_pedersen;
 pub mod sign;
 pub mod slip0010;

@@ -34,13 +34,21 @@ use tracing::{error, info, instrument, trace};
 /// participant; this type is created internally to the library.
 #[derive(Debug)]
 pub enum ProtocolType {
+    /// Key generation sub-protocol
     Keygen,
+    /// Threshold sharing sub-protocol
     Tshare,
+    /// Key refresh sub-protocol
     Keyrefresh,
+    /// Auxiliary information sub-protocol
     AuxInfo,
+    /// Pre-signing sub-protocol
     Presign,
+    /// Broadcasting sub-protocol
     Broadcast,
+    /// Signing sub-protocol
     Sign,
+    /// Interactive signing sub-protocol
     InteractiveSign,
 }
 
