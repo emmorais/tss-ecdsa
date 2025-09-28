@@ -18,9 +18,9 @@
 //!    t-out-of-n key generation and the start of support for t-out-of-n key
 //!    refresh but it is not complete.
 //!
-//! 2. Key refresh and aux-info are implemented separately from one another.
-//!    At the moment, for security after compromise, you *must* run aux-info
-//!    before key refresh.  
+//! 2. Key refresh and aux-info are implemented separately from one another. At
+//!    the moment, for security after compromise, you *must* run aux-info before
+//!    key refresh.
 //!
 //! 3. It does not implement identifiable abort. That is, the protocol will
 //!    abort if a party misbehaves, but we did not implement the procedures for
@@ -84,27 +84,27 @@
 //! These caller requirements are highlighted throughout the documentation with
 //! the 🔒 symbol. At a high level, they include:
 //!
-//! 1. Networking. The protocol requires messages to be sent
-//!    between the [`Participant`]s, but the library does not implement _any_
-//!    networking; it simply produces messages to be sent out.
-//!    See [Networking section](#-networking) below for details, including
-//!    properties that channels must maintain and validation that the calling
-//!    application must do.
+//! 1. Networking. The protocol requires messages to be sent between the
+//!    [`Participant`]s, but the library does not implement _any_ networking; it
+//!    simply produces messages to be sent out. See [Networking
+//!    section](#-networking) below for details, including properties that
+//!    channels must maintain and validation that the calling application must
+//!    do.
 //!
-//! 2. Secure persistent storage. The protocol is composed of subprotocols,
-//!    each taking input and returning output. The calling application must persist
+//! 2. Secure persistent storage. The protocol is composed of subprotocols, each
+//!    taking input and returning output. The calling application must persist
 //!    outputs, provide them as input for subsequent protocol executions, and
-//!    delete them at the end of their lifetimes. Some outputs are private values
-//!    that must be stored securely. See [`Participant`] for more details.
+//!    delete them at the end of their lifetimes. Some outputs are private
+//!    values that must be stored securely. See [`Participant`] for more
+//!    details.
 //!
-//! 3. Identifier creation. To create a [`Participant`], the calling
-//!    application must specify a session [`Identifier`] and
-//!    [`ParticipantIdentifier`]s for each party. We do not specify a protocol for
-//!    creating these; depending on the trust assumptions of the deployment, the
-//!    caller can select an appropriate protocol that will ensure that all parties
-//!    agree on the set of identifiers. See [`Identifier`] and
-//!    [`ParticipantIdentifier`] for more details. They must satisfy several
-//!    properties:     
+//! 3. Identifier creation. To create a [`Participant`], the calling application
+//!    must specify a session [`Identifier`] and [`ParticipantIdentifier`]s for
+//!    each party. We do not specify a protocol for creating these; depending on
+//!    the trust assumptions of the deployment, the caller can select an
+//!    appropriate protocol that will ensure that all parties agree on the set
+//!    of identifiers. See [`Identifier`] and [`ParticipantIdentifier`] for more
+//!    details. They must satisfy several properties:
 //!     1. All identifiers must be consistent across all
 //!     participants in a session.
 //!     2. The session [`Identifier`] must be global and unique;
@@ -202,11 +202,6 @@
 //! inconsistency across honest parties on whether an abort happened or not.
 
 #![allow(non_snake_case)] // FIXME: To be removed in the future
-#![allow(clippy::doc_lazy_continuation)]
-#![allow(dead_code)]
-#![allow(clippy::len_zero)]
-#![allow(clippy::map_all_any_identity)]
-#![allow(mismatched_lifetime_syntaxes)]
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![warn(unused_results)]
