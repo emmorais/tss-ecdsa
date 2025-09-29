@@ -14,11 +14,12 @@ use crate::{
     ParticipantIdentifier,
 };
 
+use serde::{Deserialize, Serialize};
 use tracing::error;
 
 /// Output type from key generation, including all parties' public key shares,
 /// this party's private key share, and a bit of global randomness.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Output<C> {
     public_key_shares: Vec<KeySharePublic<C>>,
     private_key_share: KeySharePrivate<C>,
